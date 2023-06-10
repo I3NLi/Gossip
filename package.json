@@ -1,0 +1,18 @@
+{
+  "name": "gossip",
+  "version": "1.0.0",
+  "description": "",
+  "main": "Gossip.js",
+  "scripts": {
+    "start": "npx nodemon src/index.mjs"
+  },
+  "author": "Boning Li",
+  "license": "ISC",
+  "dependencies": {
+    "nodemon": "^2.0.22",
+    "randombytes": "^2.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.42.0"
+  }
+}
