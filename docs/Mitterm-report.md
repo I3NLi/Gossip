@@ -3,7 +3,7 @@
 No changes.
 ## Architecture of your module
 In the architecture we created, each peer is both server and client. After the information entered, the Router handles it with size.
-```puml
+
 @startuml
 Middleware <|-- AuthMiddleware
 Controller <|-- AuthController
@@ -60,9 +60,7 @@ class NotificationController{
     handle()
 }
 
-```
-
-```puml
+@enduml
 @startuml
 actor Peer1 
 actor Peer2 #red
@@ -78,10 +76,10 @@ Controller ->ThreadWorker: add to
 actor PeerOthers
 ThreadWorker->PeerOthers: Boardcast
 
+@enduml
 
 
 
-```
 
 
 ## Security measures
