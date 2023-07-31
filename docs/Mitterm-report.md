@@ -97,7 +97,7 @@ Specific for Sybil and Eclipse attack: To enhance the resilience against Eclipse
 
 By enlarging the node list and incorporating random node removal, we introduce greater diversity and unpredictability in the network connections. These measures make it significantly more difficult for attackers to isolate a specific node or control the connectivity of the network. As a result, the network becomes more resilient against Eclipse attacks and ensures a more secure and robust environment for decentralized operations.
 
-Because our specification requires us to make every effort to propagate the announcement messages, guarding against DDoS attacks becomes extremely important. Otherwise, any node's transmission of a large amount of data will be replicated and disseminated by the announces, resulting in an amplification of data by at least n times, where n represents the number of nodes in the network. Therefore, we need a method to prevent this. We adopt a combination of blacklisting and a signature chain to prevent nodes from pushing excessive announcement messages within a short period. When we detect a node sending a large number of messages, the network will temporarily remove the node to ensure network stability. Additionally, implementing proof-of-work during network joining can hinder attackers from rapidly changing identities, thereby ensuring network robustness.
+Because our specification requires us to make every effort to propagate the announcement messages, guarding against DDoS attacks becomes extremely important. Otherwise, any node's transmission of a large amount of data will be replicated and disseminated by the announces, resulting in an amplification of data by at least n times, where n represents the number of nodes in the network. Therefore, we need a method to prevent this. We adopt a combination of blacklist and a signature chain to prevent nodes from pushing excessive announcement messages within a short period. When we detect a node sending a large number of messages, the network will temporarily remove the node to ensure network stability. Additionally, implementing proof-of-work during network joining can hinder attackers from rapidly changing identities, thereby ensuring network robustness.
 
 ## P2P Protocal
 ### ENROLL INIT
@@ -136,7 +136,7 @@ If connection is succeed, server will send to the client a ENROLL SUCCESS messag
 
 If connection is failured, server will send to the client a ENROLL FAILURE message with the neighbers information.
 
-### announce
+### Announce
 
 When we receive announce messages from other modules, this protocol is designed to make every effort to propagate these announcements. The announce protocol utilizes the BJSON format for data exchange. The data format is defined as follows:
 
