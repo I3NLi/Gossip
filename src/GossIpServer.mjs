@@ -5,7 +5,7 @@ import {MESSAGETYPE} from './MessageType.mjs';
 export default class GossipServer {
   constructor() {
     this.server = net.createServer();
-    this.KnowClients = [];
+    this.KnowClients = [];//{NetAddresse: {'socket':sockert, 'Abonnement':[]}'}
     this.UnKnowClients = [];
     this.server.on('connection', this.handleConnection.bind(this));
   }
@@ -44,9 +44,9 @@ export default class GossipServer {
       console.log("\n")
 
 
-      if(messageType.toString == '500'){
+      if(messageType.toString() == '500'){
         console.log(MESSAGETYPE[messageType]);
-      }else if (messageType.toString == '531'){
+      }else if (messageType.toString() == '531'){
         console.log(MESSAGETYPE[messageType]);
       }
 
