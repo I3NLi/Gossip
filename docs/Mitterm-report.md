@@ -97,6 +97,8 @@ Specific for Sybil and Eclipse attack: To enhance the resilience against Eclipse
 
 By enlarging the node list and incorporating random node removal, we introduce greater diversity and unpredictability in the network connections. These measures make it significantly more difficult for attackers to isolate a specific node or control the connectivity of the network. As a result, the network becomes more resilient against Eclipse attacks and ensures a more secure and robust environment for decentralized operations.
 
+Because our specification requires us to make every effort to propagate the announcement messages, guarding against DDoS attacks becomes extremely important. Otherwise, any node's transmission of a large amount of data will be replicated and disseminated by the announces, resulting in an amplification of data by at least n times, where n represents the number of nodes in the network. Therefore, we need a method to prevent this. We adopt a combination of blacklisting and a signature chain to prevent nodes from pushing excessive announcement messages within a short period. When we detect a node sending a large number of messages, the network will temporarily remove the node to ensure network stability. Additionally, implementing proof-of-work during network joining can hinder attackers from rapidly changing identities, thereby ensuring network robustness.
+
 ## P2P Protocal
 ### ENROLL INIT
 This message is sent by the server after you have connected to it. It will contain a 64 bit challenge which is to be used in calculating a response for the subsequent ENROLL REGISTER messages sent by the client.
@@ -122,6 +124,7 @@ In the message, the "size" field indicates the length of the entire message, whi
 |||
 |----------|:-------------:|
 |       size   (16 bits)     |     ENROLL SUCCESS (16 bits)   | 
+|size of neighbers (32 bits)|
 | neighbers information (4 MB) | 
 
 If connection is succeed, server will send to the client a ENROLL SUCCESS message with the neighbers information.
@@ -133,8 +136,29 @@ If connection is succeed, server will send to the client a ENROLL SUCCESS messag
 
 If connection is failured, server will send to the client a ENROLL FAILURE message with the neighbers information.
 
+### announce
+
+When we receive announce messages from other modules, this protocol is designed to make every effort to propagate these announcements. The announce protocol utilizes the BJSON format for data exchange. The data format is defined as follows:
+
+```typescript
+{
+  TYPE: "ANNOUNCE",
+  ID: String (hash value of the original message),
+  MESSAGE: String (encrypted message),
+  KEYLIST: publicKey[] (array of public keys),
+  NEIGHBERSSIZE: number,
+  TTL: number
+}
+```
+
+The "announce" type indicates that it's an announcement message. The "ID" field represents the hash value of the original message, which allows for verification and identification of the message's integrity. The actual content of the message is stored in the "MESSAGE" field, encrypted to ensure data security. The "KEYLIST" field contains an array of public keys, which are essential for the decryption process to retrieve the original message content. This field is also used to indicate which nodes have forwarded the data.
+
+To enhance the propagation efficiency, we employ various optimization techniques. First, we prioritize the forwarding of announcement messages to nodes with a higher reliability score, which ensures that critical information reaches trustworthy destinations promptly. Additionally, we implement a caching mechanism that stores previously processed announcements, avoiding redundant processing and transmission of identical messages.
+
+To prevent potential network overload and minimize unnecessary resource consumption, we introduce a Time-to-Live (TTL) parameter. This parameter defines the maximum duration for which the announce message remains valid and relevant for propagation. Once the TTL expires, the message is no longer forwarded to avoid outdated or obsolete data circulating within the network.
+
 ### Other APIs
-While the remaining APIs adhere to the Voidphone Project Specification, there is a distinction in the "data" field. In our implementation, the data is encrypted using the client's public key. This encryption mechanism enhances the security of the transmitted information, ensuring that only the intended recipient with the corresponding private key can decrypt and access the data.
+While the remaining APIs adhere to the Voidphone Project Specification.
 
 ## Exception handling 
 Churn: Increased connectivity: When a node decides to leave the network, it is important to ensure the connectivity of the remaining nodes. To achieve this, a connectivity check is performed. If the connectivity of the departing node is below a certain threshold, indicating insufficient connections, a process is initiated to connect its neighboring nodes to existing nodes in the network. By establishing these additional connections, the network's overall connectivity is maintained and strengthened, reducing the impact of the departing node on the network's structure and functionality. This proactive approach helps to mitigate any potential disruptions caused by node departures and fosters a more resilient and interconnected peer-to-peer network.
@@ -146,6 +170,8 @@ Connection breaks: To handle connection breaks in a more robust manner, we can i
 + Limited Retry Attempts: The retry attempts are limited to three times, ensuring that the system does not get stuck indefinitely in attempting to reconnect.
 
 + Throw Exception: If the connection attempts are unsuccessful after three retries, an exception is thrown. This informs the system or application that the connection could not be established, allowing appropriate error handling or fallback mechanisms to be triggered.
+
+Additionally, each node is responsible for maintaining its own online status. It calculates its Local Clustering Coefficient based on the number of neighbors' neighbors. If the node discovers that its coefficient is too low, it will attempt to randomly connect with other nodes.
 
 By incorporating this retry mechanism, we provide a more resilient approach to handling connection breaks. It allows the system to make multiple attempts to restore the connection while avoiding excessive retries that could impact overall performance or cause unnecessary delays.
 
