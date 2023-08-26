@@ -61,6 +61,7 @@ class NotificationController{
 }
 
 @enduml
+
 @startuml
 actor Peer1 
 actor Peer2 #red
