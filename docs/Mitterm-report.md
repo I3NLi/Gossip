@@ -137,7 +137,7 @@ If connection is succeed, server will send to the client a ENROLL SUCCESS messag
 
 If connection is failured, server will send to the client a ENROLL FAILURE message with the neighbers information.
 
-### Announce
+### ANNOUNCE
 
 When we receive announce messages from other modules, this protocol is designed to make every effort to propagate these announcements. The announce protocol utilizes the BJSON format for data exchange. The data format is defined as follows:
 
