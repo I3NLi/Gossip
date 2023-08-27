@@ -5,7 +5,8 @@
   "main": "Gossip.js",
   "scripts": {
     "start": "npx nodemon src/index.ts",
-    "eslint": "eslint"
+    "eslint": "eslint",
+    "doc":"typedoc"
   },
   "author": "Boning Li",
   "license": "ISC",
