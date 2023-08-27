@@ -72,62 +72,63 @@ export default class GossipServer {
       console.error(err);
     });
   }
-
+  /**
+   * To handle the announcement request.
+   * @param data The message received.
+   */
   private handleAnnounce(data: Buffer) {
-    /** TODO: 
-     * Message to instruct Gossip to spread the knowledge about given data item. It is sent from
-     * other modules to the Gossip module. No return value or confirmation is sent by Gossip for
-     * this message. The Gossip should put in its best effort to spread this information.
-     * 
-     * The TTL field specifies until how many hops the overlying application requires this data
-     * to be spread. A value of 0 implies unlimited hops. The data type field specifies the type
-     * of the application data. The data type should not be confused with the message type field:
-     * While they are similar, message types are used to identify messages in the API protocols,
-     * whereas the data type is used to identify the application data Gossip spreads in the network.
-     * 
-     * Since this message does not evoke a response from Gossip, no assumptions about successful
-     * spreading of the data in the message can be made. Knowledge spreading is best effort and
-     * can only be seen as probabilistic. However, with enough cache size and well connectivity, it
-     * is very likely to achieve a good chance of knowledge spreading in the network.
-     * 
-     * */
+    // Extract Time-to-Live (TTL) value from the data starting at index 4 with a length of 1 byte.
+    // The TTL field specifies until how many hops the overlying application requires this data
+    // to be spread.
     const ttl = data.readUIntBE(4, 1);
+
+    // Extract the reserved field from the data starting at index 5 with a length of 1 byte.
     const reserved = data.readUIntBE(5, 1);
+
+    // Extract the data type from the data starting at index 6 using 2 bytes (UInt16).
     const dataType = data.readUInt16BE(6);
+
+    // Extract the message data from the data starting at index 8 to the end of the array.
     const messageData = data.subarray(8);
+
+    // Display extracted values with explanatory messages.
     console.log(`TTL: ${ttl}`);
     console.log(`Reserved: ${reserved}`);
     console.log(`Data Type: ${dataType}`);
     console.log(`Message Data: ${messageData.toString()}`);
     console.log('\n');
+
   }
 
-  private handleNotify(data: Buffer, socket: net.Socket) {
-    /**
-     * This message serves two purposes. Firstly, it is used to instruct Gossip to notify the module
-     * sending this message when a new application data message of given type is received by it.
-     * The new data message could have been received from another peer or by another module
-     * of the local peer. The caller of this API will be notified by the Gossip through GOSSIP
-     * NOTIFICATION messages (See Section 4.2.3). The data type field specifies which type of
-     * messages the caller is interested in being notified.
-     * The second purpose of this message is to tell Gossip which message types are valid and
-     * hence should be propagated further. This means only messages for which a module has
-     * registered a notification from Gossip will be propagated by Gossip. */
+  /**
+ * Handles the incoming notification message.
+ * @param {Buffer} data - The incoming message data.
+ * @param {net.Socket} socket - The socket associated with the incoming message.
+ */
+private handleNotify(data: Buffer, socket: net.Socket) {
+  // Extract reserved field from the data using 2 bytes (UInt16).
+  const reserved = data.readUInt16BE(4);
 
-    const reserved = data.readUInt16BE(4);
-    const dataType = data.readUInt16BE(6);
-    if (this.Topics[dataType] === undefined) {
-      this.Topics[dataType] = [];
-    }
+  // Extract data type from the data using 2 bytes (UInt16).
+  const dataType = data.readUInt16BE(6);
 
-    if (this.Topics[dataType].includes(socket)) {
-      console.error('Socket already in topic');
-    } else {
-      this.Topics[dataType].push(socket);
-    }
-    console.log(`Reserved: ${reserved}`);
-    console.log(`Data Type: ${dataType}`);
+  // Check if the topic array for this data type exists, and create it if not.
+  if (this.Topics[dataType] === undefined) {
+    this.Topics[dataType] = [];
   }
+
+  // Add the socket to the list of sockets interested in this data type.
+  if (this.Topics[dataType].includes(socket)) {
+    console.error('Socket already in topic');
+  } else {
+    this.Topics[dataType].push(socket);
+  }
+
+  // Display extracted values for logging or debugging.
+  console.log(`Reserved: ${reserved}`);
+  console.log(`Data Type: ${dataType}`);
+}
+
 
 
   /** Extern Only */
