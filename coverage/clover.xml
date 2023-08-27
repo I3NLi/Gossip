@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1693167465067" clover="3.2.0">
+  <project timestamp="1693167465067" name="All files">
+    <metrics statements="11" coveredstatements="11" conditionals="1" coveredconditionals="1" methods="4" coveredmethods="4" elements="16" coveredelements="16" complexity="0" loc="11" ncloc="11" packages="1" files="1" classes="1"/>
+    <file name="MessageType.ts" path="D:\Desktop\学习\p2p\Gossip-10\src\MessageType.ts">
+      <metrics statements="11" coveredstatements="11" conditionals="1" coveredconditionals="1" methods="4" coveredmethods="4"/>
+      <line num="2" count="1" type="stmt"/>
+      <line num="60" count="1" type="stmt"/>
+      <line num="63" count="1" type="stmt"/>
+      <line num="65" count="1" type="stmt"/>
+      <line num="66" count="51" type="cond" truecount="1" falsecount="0"/>
+      <line num="67" count="51" type="stmt"/>
+      <line num="68" count="51" type="stmt"/>
+      <line num="71" count="1" type="stmt"/>
+      <line num="75" count="1" type="stmt"/>
+      <line num="78" count="1" type="stmt"/>
+      <line num="83" count="1" type="stmt"/>
+    </file>
+  </project>
+</coverage>

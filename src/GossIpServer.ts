@@ -1,5 +1,19 @@
 import * as net from 'net';
-import { MESSAGETYPE } from './MessageType';
+import MESSAGETYPE from './MessageType';
+import { serialize, deserialize, BSONError } from 'bson';
+import randomBytes from 'randombytes';
+import { createHash } from 'crypto';
+
+/**.ini */
+const ENROLL_TIMEOUT = 15000;
+
+/** Type Declaration */
+enum EncryptionType {
+  RSA = 'rsa2048',
+  RSA2048 = 'rsa2048',
+}
+type Header = { size: number, messageType: number }
+type RegisterMessage = { messageType: string, challenge: string, nonce: string, encryptionType: EncryptionType, publicKey: string }
 
 export default class GossipServer {
   /* Shared */
@@ -13,7 +27,8 @@ export default class GossipServer {
   private Topics: { [dataType: string]: net.Socket[] } = {};
 
   /* Extern Only */
-  // private Peer: []] = [];
+  private Peer: { [publicKey: string]: { [socket: string]: net.Socket } } = {};
+  private Challenges: { [address: string]: { challenge: string, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket } } = {};
 
   constructor(internPort = 7001, externPort = 4000) {
     // Create internal and external servers
@@ -36,21 +51,18 @@ export default class GossipServer {
     console.log('New internClient connected from ' + this.getNetAddresses(socket));
 
     socket.on('data', (data: Buffer) => {
+      const {size, messageType} = this.getHeader(data);
+
       console.log(`Received data from internClient client: ${this.getNetAddresses(socket)}`);
-
-      //Read Header of the message
-      const size = data.readUInt16BE(0);
-      const messageType = data.readUInt16BE(2);
-
       console.log(`Message Size: ${size}`);
-      console.log(`Message Type: ${messageType} ${MESSAGETYPE[messageType.toString()]}`);
+      console.log(`Message Type: ${messageType} ${MESSAGETYPE.getName(messageType.toString())}`);
 
       // Dispatch message to corresponding handler
-      if (MESSAGETYPE[messageType.toString()] === 'GOSSIP ANNOUNCE') {
+      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ANNOUNCE') {
         this.handleAnnounce(data);
-      } else if (MESSAGETYPE[messageType.toString()] === 'GOSSIP NOTIFY') {
+      } else if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP NOTIFY') {
         this.handleNotify(data, socket);
-      } else if (MESSAGETYPE[messageType.toString()] === 'GOSSIP VALIDATION') {
+      } else if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP VALIDATION') {
         this.handleValidation(data);
       }
     });
@@ -133,32 +145,25 @@ export default class GossipServer {
   /** Extern Only */
   private handleExternConnection(socket: net.Socket) {
     /**TODO
-     * 
-     * 
      */
 
     const address = this.getNetAddresses(socket);
+    this.sendChallenge(socket);
+    console.log(``);
     console.log('New externClient connected from ' + address);
-    
 
     socket.on('data', (data: Buffer) => {
+      const {size, messageType} = this.getHeader(data);
+
+      console.log(``);
       console.log(`Received data from internClient client: ${data}`);
-
-      //Read Header of the message
-      const size = data.readUInt16BE(0);
-      const messageType = data.readUInt16BE(2);
-
-      console.log(`Message Size: ${size}`);
-      console.log(`Message Type: ${messageType} ${MESSAGETYPE[messageType.toString()]}`);
+      console.log(`Message Type: ${messageType} ${MESSAGETYPE.getName(messageType.toString())}`);
 
       // Dispatch message to corresponding handler
-      if (MESSAGETYPE[messageType.toString()] === 'GOSSIP ANNOUNCE') {
-        this.handleAnnounce(data);
-      } else if (MESSAGETYPE[messageType.toString()] === 'GOSSIP NOTIFY') {
-        this.handleNotify(data, socket);
-      } else if (MESSAGETYPE[messageType.toString()] === 'GOSSIP VALIDATION') {
-        this.handleValidation(data);
+      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL REGISTER') {
+        this.handleRegister(socket, data);
       }
+
     });
 
     // Remove the socket from the topics when the client disconnects
@@ -179,7 +184,117 @@ export default class GossipServer {
     });
   }
 
+  private sendChallenge(socket: net.Socket) {
+    const address = this.getNetAddresses(socket);
+    const challenge = randomBytes(64);
+
+    const destroyClockId = setTimeout(() => {
+      socket.end();
+    }, ENROLL_TIMEOUT);
+
+    this.Challenges[address] = {
+      challenge: challenge.toString('hex'),
+      destroyClockId: destroyClockId,
+      socket: socket
+    }
+  }
+
+
+
+  private handleRegister(socket: net.Socket, data: Buffer) {
+    const ttl = data.readUIntBE(4, 1);
+    const reserved = data.readUIntBE(5, 1);
+    const dataType = data.readUInt16BE(6);
+    const messageData = data.subarray(8);
+
+
+    const challengeBuffer = Buffer.from(challenge, 'hex');
+    const nonceBuffer = Buffer.from(nonce, 'hex');
+    const encryptionTypeBuffer = Buffer.from(encryptionType, 'hex');
+    const publicKeyBuffer = Buffer.from(publicKey, 'hex');
+
+    const payload = Buffer.concat([challengeBuffer, nonceBuffer, publicKeyBuffer]);
+    const address = this.getNetAddresses(socket);
+    if (this.verifyChallenge(payload)) {
+      this.Peer[publicKey] = { socket: socket };
+      clearTimeout(this.Challenges[address].destroyClockId);
+      delete this.Challenges[address];
+      this.handleRegisterSuccess(socket);
+    }else{
+      clearTimeout(this.Challenges[address].destroyClockId);
+      socket.end();
+    }
+
+
+  }
+  private handleRegisterSuccess(socket: net.Socket) {
+    // const size = Buffer.alloc(2);
+    // const messageType = Buffer.alloc(2);
+    // const reserved = Buffer.alloc(2);
+    // const success = Buffer.alloc(1);
+
+    // size.writeUInt16BE(9);
+    // messageType.writeUInt16BE(689);
+    // reserved.writeUInt16BE(0);
+    // success.writeUInt8(1);
+
+    // const payload = Buffer.concat([size, messageType, reserved, success]);
+
+    // socket.write(payload);
+  }
+  private verifyChallenge(payload: Buffer): boolean {
+    const sha256 = createHash('sha256').update(payload).digest('hex');
+    return sha256.startsWith('000000');
+  }
+  // do {
+  //   let nonce = randomBytes(8);
+
+  //   payload = Buffer.concat(
+  //       [challenge,
+  //           teamNumber,
+  //           projectChoice,
+  //           nonce,
+  //           Buffer.from(utf8encoder.encode(
+  //               email + "\r\n"
+  //               + firstname + "\r\n"
+  //               + lastname + "\r\n"
+  //               + lrzGitLabUsername))]);
+
+  //   // console.log(`paylpoad: ${payload.toString("hex")}`);
+  //   // console.log(`paylpoad: "${payload.toString("ascii")}"`);
+  //   // payloadUTF8 = hexToUtf8(payload);
+  //   // console.log(`paylpoad utf8: ${stringToHex(payloadUTF8)}`);
+  //   // // console.log(stringToHex(payloadUTF8)==payload);
+
+  //   sha256 = createHash('sha256').update(payload).digest('hex');
+  //   // sha256="000000cec83b9daf2984245367d702a8331b292bb5737"
+
+  // } while (!sha256.startsWith('000000'))
+
   /** Shared */
+  private sendResponse(socket: net.Socket, messageType: number|string, payload: Buffer) {
+    const size = Buffer.alloc(2);
+    const messageTypeBuffer = Buffer.alloc(2);
+
+    if(typeof messageType === 'string'){
+      messageType=parseInt(messageType);
+    }
+    if(typeof messageType !== 'number'){
+      throw new Error('messageType should not be message type name');
+    }
+    size.writeUInt16BE(payload.length + 16);
+    messageTypeBuffer.writeUInt16BE(messageType);
+
+    const response = Buffer.concat([size, messageTypeBuffer, payload]);
+    socket.write(response);
+  }
+
+  private getHeader(data: Buffer): Header{
+    const size = data.readUInt16BE(0);
+    const messageType = data.readUInt16BE(2);
+    return { size, messageType};
+  }
+
   private broadcast(messageID: Buffer) {
 
   }
@@ -204,15 +319,10 @@ export default class GossipServer {
      * other peers if it is well-formed.
      * 
      */
-    const size = Buffer.alloc(2);
-    const messageType = Buffer.alloc(2);
-
-    size.writeUInt16BE(data.length + 16);
-    messageType.writeUInt16BE(502);
-
-    const payload = Buffer.concat([size, messageType, messageID, dataType, data]);
+    const payload = Buffer.concat([messageID, dataType, data]);
 
     this.Topics[dataType.toString()].forEach((socket) => {
+      this.sendResponse(socket, 502, payload);
       socket.write(payload);
     })
   }
