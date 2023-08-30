@@ -59,11 +59,11 @@ class MessageType {
     }
     private MESSAGETYPE_INV: Record<string, string> = this.reverseObjectKeyValue(this.MESSAGETYPE)
 
-    private reverseObjectKeyValue(inputObject: { [key: string]: any }): { [key: string]: string } {
-        const reversedObject: { [key: string]: string } = {};
+    private reverseObjectKeyValue(inputObject: Record<string, string>): Record<string, string> {
+        const reversedObject: Record<string, string> = {};
 
         for (const key in inputObject) {
-            if (inputObject.hasOwnProperty(key)) {
+            if (Object.prototype.hasOwnProperty.call(inputObject, key)) {
                 const value = inputObject[key];
                 reversedObject[value] = key;
             }

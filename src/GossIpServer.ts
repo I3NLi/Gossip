@@ -1,16 +1,24 @@
+/* eslint-disable @typescript-eslint/no-duplicate-enum-values */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 import * as net from 'net';
-import MESSAGETYPE from './MessageType';
-import { serialize, deserialize, BSONError } from 'bson';
+import shuffle from 'lodash/shuffle';
 import randomBytes from 'randombytes';
+
+import MESSAGETYPE from './MessageType';
+
+import { add } from 'lodash';
 import { createHash } from 'crypto';
+import { serialize, deserialize, BSONError } from 'bson';
 
 /**.ini */
 const ENROLL_TIMEOUT = 15000;
+const MAX_SIZE_OF_NEIGHBERS_TO_SHARE = 3;
 
 /** Type Declaration */
 enum EncryptionType {
-  RSA = 'rsa2048',
-  RSA2048 = 'rsa2048',
+  RSA = 0, //RSA2048
+  RSA2048 = 0,
 }
 type Header = { size: number, messageType: number }
 type RegisterMessage = { messageType: string, challenge: string, nonce: string, encryptionType: EncryptionType, publicKey: string }
@@ -51,7 +59,7 @@ export default class GossipServer {
     console.log('New internClient connected from ' + this.getNetAddresses(socket));
 
     socket.on('data', (data: Buffer) => {
-      const {size, messageType} = this.getHeader(data);
+      const { size, messageType } = this.getHeader(data);
 
       console.log(`Received data from internClient client: ${this.getNetAddresses(socket)}`);
       console.log(`Message Size: ${size}`);
@@ -153,7 +161,7 @@ export default class GossipServer {
     console.log('New externClient connected from ' + address);
 
     socket.on('data', (data: Buffer) => {
-      const {size, messageType} = this.getHeader(data);
+      const { size, messageType } = this.getHeader(data);
 
       console.log(``);
       console.log(`Received data from internClient client: ${data}`);
@@ -199,49 +207,59 @@ export default class GossipServer {
     }
   }
 
-
-
   private handleRegister(socket: net.Socket, data: Buffer) {
-    const ttl = data.readUIntBE(4, 1);
-    const reserved = data.readUIntBE(5, 1);
-    const dataType = data.readUInt16BE(6);
-    const messageData = data.subarray(8);
+    const challenge = data.subarray(0, 8);
+    const nonce = data.subarray(8, 16);
+    // reserved for future use, currently only SHA-256 is supported
+    const HashAlgorithmType = data.readUIntBE(16, 1);
+    // reserved for future use, currently only RSA-2048 is supported
+    const encryptionType = data.readUIntBE(17, 1);
+    const publicKey = data.subarray(18);
 
-
-    const challengeBuffer = Buffer.from(challenge, 'hex');
-    const nonceBuffer = Buffer.from(nonce, 'hex');
-    const encryptionTypeBuffer = Buffer.from(encryptionType, 'hex');
-    const publicKeyBuffer = Buffer.from(publicKey, 'hex');
-
-    const payload = Buffer.concat([challengeBuffer, nonceBuffer, publicKeyBuffer]);
+    const payload = Buffer.concat([challenge, nonce, publicKey]);
     const address = this.getNetAddresses(socket);
+
     if (this.verifyChallenge(payload)) {
-      this.Peer[publicKey] = { socket: socket };
+      this.Peer[publicKey.toString('ascii')] = { socket: socket };
       clearTimeout(this.Challenges[address].destroyClockId);
       delete this.Challenges[address];
-      this.handleRegisterSuccess(socket);
-    }else{
+      this.sendRegisterSuccess(socket);
+    } else {
       clearTimeout(this.Challenges[address].destroyClockId);
       socket.end();
     }
-
-
   }
-  private handleRegisterSuccess(socket: net.Socket) {
-    // const size = Buffer.alloc(2);
-    // const messageType = Buffer.alloc(2);
-    // const reserved = Buffer.alloc(2);
-    // const success = Buffer.alloc(1);
 
-    // size.writeUInt16BE(9);
-    // messageType.writeUInt16BE(689);
-    // reserved.writeUInt16BE(0);
-    // success.writeUInt8(1);
 
-    // const payload = Buffer.concat([size, messageType, reserved, success]);
+  private sendRegisterSuccess(socket: net.Socket) {
+    const sizeOfNeighbers= Object.keys(this.Peer).length;
+    let sizeOfNeighbersToShare: number = sizeOfNeighbers / 2;
+    sizeOfNeighbersToShare = Math.min(sizeOfNeighbersToShare, MAX_SIZE_OF_NEIGHBERS_TO_SHARE);
 
-    // socket.write(payload);
+    const sizeOfNeighbersBuffer = Buffer.alloc(1).writeUIntBE(sizeOfNeighbers,0,1);
+    const encryptionTypeBuffer = Buffer.alloc(1).writeUIntBE(EncryptionType.RSA2048,0,1);
+    const SharedNeighbersBuffer = Buffer.alloc(18 * sizeOfNeighbersToShare);
+
+    //get random neighbers slice from peer
+    const peerKeys = shuffle(Object.keys(this.Peer));
+    const randomNeighbers = peerKeys.slice(0, sizeOfNeighbersToShare);
+
+    const addressBuffers: Buffer[] = [];
+    // write random neighbers to buffer
+    randomNeighbers.forEach((publicKey, index) => {
+      const ip = this.Peer[publicKey].socket.remoteAddress
+      const port = this.Peer[publicKey].socket.remotePort;
+
+      // const ipBuffer = net.isIPv6(ip) ? ip6.toBuffer(ip) : ip.toBuffer(ip);
+      // const portBuffer = Buffer.alloc(2).writeUInt16BE(port);
+
+      addressBuffers.push(Buffer.concat([ipBuffer, portBuffer]));
+    });
+
+    const payload = Buffer.concat(addressBuffers);
+    this.sendResponse(socket, 507, payload);
   }
+
   private verifyChallenge(payload: Buffer): boolean {
     const sha256 = createHash('sha256').update(payload).digest('hex');
     return sha256.startsWith('000000');
@@ -272,16 +290,17 @@ export default class GossipServer {
   // } while (!sha256.startsWith('000000'))
 
   /** Shared */
-  private sendResponse(socket: net.Socket, messageType: number|string, payload: Buffer) {
+  private sendResponse(socket: net.Socket, messageType: number | string, payload: Buffer) {
     const size = Buffer.alloc(2);
     const messageTypeBuffer = Buffer.alloc(2);
 
-    if(typeof messageType === 'string'){
-      messageType=parseInt(messageType);
+    if (typeof messageType === 'string') {
+      messageType = parseInt(messageType);
     }
-    if(typeof messageType !== 'number'){
+    if (typeof messageType !== 'number') {
       throw new Error('messageType should not be message type name');
     }
+
     size.writeUInt16BE(payload.length + 16);
     messageTypeBuffer.writeUInt16BE(messageType);
 
@@ -289,10 +308,10 @@ export default class GossipServer {
     socket.write(response);
   }
 
-  private getHeader(data: Buffer): Header{
+  private getHeader(data: Buffer): Header {
     const size = data.readUInt16BE(0);
     const messageType = data.readUInt16BE(2);
-    return { size, messageType};
+    return { size, messageType };
   }
 
   private broadcast(messageID: Buffer) {
@@ -303,7 +322,7 @@ export default class GossipServer {
 
   }
 
-  private handleErrorMesssage(messageID: Buffer) { };
+  private handleErrorMesssage(messageID: Buffer) { }
 
   private sendNotification(messageID: Buffer, dataType: Buffer, data: Buffer) {
     /** TODO:

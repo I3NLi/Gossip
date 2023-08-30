@@ -1,4 +1,4 @@
-import MESSAGETYPE from './MessageType';
+import MESSAGETYPE from '../MessageType';
 
 describe('MESSAGETYPE', () => {
     it('should get code by name', () => {
