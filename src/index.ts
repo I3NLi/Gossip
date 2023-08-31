@@ -1,14 +1,13 @@
 import GossipServer from "./GossIpServer";
+// Import necessary libraries
+import args from 'args';
+import fs from 'fs';
+import ini from 'ini';
 
 
 // TODO: import config from config.ini
 // TODO: import config from Args
-const server = new GossipServer(7001, 4000);
 
-// Import necessary libraries
-const args = require('args');
-const fs = require('fs');
-const ini = require('ini');
 
 // Define command-line options
 args.option('config', 'Path to the configuration file (-c)', 'config.ini');
@@ -28,3 +27,5 @@ const appTheme = config.app.theme;
 // Use configuration parameters in your module
 console.log(`Database Host: ${databaseHost}`);
 console.log(`App Theme: ${appTheme}`);
+
+const server = new GossipServer(7001, 4000);

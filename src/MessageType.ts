@@ -6,12 +6,13 @@ class MessageType {
         "503": "GOSSIP VALIDATION",
 
         "505": "GOSSIP ENROLL INIT",
-        "506": "GOSSIP ENROLL REGISTER",
-        "507": "GOSSIP ENROLL SUCCESS",
+        "506": "GOSSIP ENROLL CHALLENGE",
+        "507": "GOSSIP ENROLL REGISTER",
+        "508": "GOSSIP ENROLL SUCCESS",
 
-        "508": "GOSSIP RESPONSE SUCCESS",
-        "509": "GOSSIP RESPONSE FAILURE",
-        "510": "GOSSIP ENROLL FAILURE",
+        // "508": "GOSSIP RESPONSE SUCCESS",
+        // "509": "GOSSIP RESPONSE FAILURE",
+        // "510": "GOSSIP ENROLL FAILURE",
 
 
 
@@ -71,11 +72,11 @@ class MessageType {
         return reversedObject;
     }
 
-    public getCode(code: string): string | undefined {
-        return this.MESSAGETYPE_INV[code]
+    public getCode(name: string): string  {
+        return this.MESSAGETYPE_INV[name]
     }
-    public getName(name: string): string | undefined {
-        return this.MESSAGETYPE[name]
+    public getName(code: string): string  {
+        return this.MESSAGETYPE[code]
 
     }
 }

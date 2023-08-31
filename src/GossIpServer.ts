@@ -8,27 +8,33 @@ import randomBytes from 'randombytes';
 import MESSAGETYPE from './MessageType';
 
 import { add } from 'lodash';
-import { createHash } from 'crypto';
+import { createHash, generateKeyPairSync } from 'crypto';
 import { serialize, deserialize, BSONError } from 'bson';
+import IP from './ip';
+import MessageType from './MessageType';
+
+import { EncryptionType , Header } from './TypeDefiniton';
+import * as ExternProtocol from './ExternProtocol';
+ 
 
 /**.ini */
-const ENROLL_TIMEOUT = 15000;
-const MAX_SIZE_OF_NEIGHBERS_TO_SHARE = 3;
-
-/** Type Declaration */
-enum EncryptionType {
-  RSA = 0, //RSA2048
-  RSA2048 = 0,
+const defaultConfig = {
+  ENROLL_TIMEOUT: 15000,
+  MAX_SIZE_OF_NEIGHBERS_TO_SHARE: 3,
+  ENCRYPTION_TYPE: EncryptionType.RSA2048,
 }
-type Header = { size: number, messageType: number }
-type RegisterMessage = { messageType: string, challenge: string, nonce: string, encryptionType: EncryptionType, publicKey: string }
 
 export default class GossipServer {
   /* Shared */
   // store the cache of the messages
+  private Config: { [key: string]: any } = {};
+  // Cache for messages
   private Cache: any = {};
   private InternServer: net.Server;
   private ExternServer: net.Server;
+
+  private publicKey;
+  private privateKey;
 
   /* Intern Only */
   // store the subscribed topics relation with socket
@@ -38,7 +44,9 @@ export default class GossipServer {
   private Peer: { [publicKey: string]: { [socket: string]: net.Socket } } = {};
   private Challenges: { [address: string]: { challenge: string, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket } } = {};
 
-  constructor(internPort = 7001, externPort = 4000) {
+  constructor(internPort = 7001, externPort = 4000, config = defaultConfig) {
+    this.Config = config;
+
     // Create internal and external servers
     this.InternServer = net.createServer();
     this.ExternServer = net.createServer();
@@ -51,6 +59,25 @@ export default class GossipServer {
     this.InternServer.on('connection', this.handleInternConnection.bind(this));
     this.ExternServer.on('connection', this.handleExternConnection.bind(this));
     console.log('GossipServer created');
+
+    // Generate RSA key pair
+    if (this.Config.ENCRYPTION_TYPE === EncryptionType.RSA2048) {
+      const { privateKey, publicKey } = generateKeyPairSync('RSA', {
+        modulusLength: 2048,
+        publicKeyEncoding: {
+          type: 'spki',
+          format: 'PEM'
+        },
+        privateKeyEncoding: {
+          type: 'pkcs8',
+          format: 'PEM'
+        }
+      });
+
+      this.publicKey = publicKey;
+      this.privateKey = privateKey;
+    }
+
   }
 
   /** Intern Only */
@@ -92,63 +119,62 @@ export default class GossipServer {
       console.error(err);
     });
   }
-  /**
-   * To handle the announcement request.
-   * @param data The message received.
-   */
+
   private handleAnnounce(data: Buffer) {
-    // Extract Time-to-Live (TTL) value from the data starting at index 4 with a length of 1 byte.
-    // The TTL field specifies until how many hops the overlying application requires this data
-    // to be spread.
+    /** TODO: 
+     * Message to instruct Gossip to spread the knowledge about given data item. It is sent from
+     * other modules to the Gossip module. No return value or confirmation is sent by Gossip for
+     * this message. The Gossip should put in its best effort to spread this information.
+     * 
+     * The TTL field specifies until how many hops the overlying application requires this data
+     * to be spread. A value of 0 implies unlimited hops. The data type field specifies the type
+     * of the application data. The data type should not be confused with the message type field:
+     * While they are similar, message types are used to identify messages in the API protocols,
+     * whereas the data type is used to identify the application data Gossip spreads in the network.
+     * 
+     * Since this message does not evoke a response from Gossip, no assumptions about successful
+     * spreading of the data in the message can be made. Knowledge spreading is best effort and
+     * can only be seen as probabilistic. However, with enough cache size and well connectivity, it
+     * is very likely to achieve a good chance of knowledge spreading in the network.
+     * 
+     * */
     const ttl = data.readUIntBE(4, 1);
-
-    // Extract the reserved field from the data starting at index 5 with a length of 1 byte.
     const reserved = data.readUIntBE(5, 1);
-
-    // Extract the data type from the data starting at index 6 using 2 bytes (UInt16).
     const dataType = data.readUInt16BE(6);
-
-    // Extract the message data from the data starting at index 8 to the end of the array.
     const messageData = data.subarray(8);
-
-    // Display extracted values with explanatory messages.
     console.log(`TTL: ${ttl}`);
     console.log(`Reserved: ${reserved}`);
     console.log(`Data Type: ${dataType}`);
     console.log(`Message Data: ${messageData.toString()}`);
     console.log('\n');
-
   }
 
-  /**
- * Handles the incoming notification message.
- * @param {Buffer} data - The incoming message data.
- * @param {net.Socket} socket - The socket associated with the incoming message.
- */
-private handleNotify(data: Buffer, socket: net.Socket) {
-  // Extract reserved field from the data using 2 bytes (UInt16).
-  const reserved = data.readUInt16BE(4);
+  private handleNotify(data: Buffer, socket: net.Socket) {
+    /**
+     * This message serves two purposes. Firstly, it is used to instruct Gossip to notify the module
+     * sending this message when a new application data message of given type is received by it.
+     * The new data message could have been received from another peer or by another module
+     * of the local peer. The caller of this API will be notified by the Gossip through GOSSIP
+     * NOTIFICATION messages (See Section 4.2.3). The data type field specifies which type of
+     * messages the caller is interested in being notified.
+     * The second purpose of this message is to tell Gossip which message types are valid and
+     * hence should be propagated further. This means only messages for which a module has
+     * registered a notification from Gossip will be propagated by Gossip. */
 
-  // Extract data type from the data using 2 bytes (UInt16).
-  const dataType = data.readUInt16BE(6);
+    const reserved = data.readUInt16BE(4);
+    const dataType = data.readUInt16BE(6);
+    if (this.Topics[dataType] === undefined) {
+      this.Topics[dataType] = [];
+    }
 
-  // Check if the topic array for this data type exists, and create it if not.
-  if (this.Topics[dataType] === undefined) {
-    this.Topics[dataType] = [];
+    if (this.Topics[dataType].includes(socket)) {
+      console.error('Socket already in topic');
+    } else {
+      this.Topics[dataType].push(socket);
+    }
+    console.log(`Reserved: ${reserved}`);
+    console.log(`Data Type: ${dataType}`);
   }
-
-  // Add the socket to the list of sockets interested in this data type.
-  if (this.Topics[dataType].includes(socket)) {
-    console.error('Socket already in topic');
-  } else {
-    this.Topics[dataType].push(socket);
-  }
-
-  // Display extracted values for logging or debugging.
-  console.log(`Reserved: ${reserved}`);
-  console.log(`Data Type: ${dataType}`);
-}
-
 
 
   /** Extern Only */
@@ -169,6 +195,12 @@ private handleNotify(data: Buffer, socket: net.Socket) {
       console.log(`Message Type: ${messageType} ${MESSAGETYPE.getName(messageType.toString())}`);
 
       // Dispatch message to corresponding handler
+      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL INIT') {
+        this.sendChallenge(socket);
+      }
+      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL CHALLENGE') {
+        this.solveChallenge(socket, data);
+      }
       if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL REGISTER') {
         this.handleRegister(socket, data);
       }
@@ -199,15 +231,21 @@ private handleNotify(data: Buffer, socket: net.Socket) {
 
     const destroyClockId = setTimeout(() => {
       socket.end();
-    }, ENROLL_TIMEOUT);
+    }, this.Config.ENROLL_TIMEOUT);
 
     this.Challenges[address] = {
       challenge: challenge.toString('hex'),
       destroyClockId: destroyClockId,
       socket: socket
     }
+    this.sendResponse(socket, MessageType.getCode('GOSSIP ENROLL CHALLENGE'), challenge);
   }
 
+  private solveChallenge(socket: net.Socket, data: Buffer) {
+    const challenge = data.subarray(0, 8);
+    const nonce = randomBytes(64);
+    const payload = Buffer.concat([challenge, nonce, this.publicKey.]);
+  }
   private handleRegister(socket: net.Socket, data: Buffer) {
     const challenge = data.subarray(0, 8);
     const nonce = data.subarray(8, 16);
@@ -233,28 +271,26 @@ private handleNotify(data: Buffer, socket: net.Socket) {
 
 
   private sendRegisterSuccess(socket: net.Socket) {
-    const sizeOfNeighbers= Object.keys(this.Peer).length;
+    const sizeOfNeighbers = Object.keys(this.Peer).length;
     let sizeOfNeighbersToShare: number = sizeOfNeighbers / 2;
-    sizeOfNeighbersToShare = Math.min(sizeOfNeighbersToShare, MAX_SIZE_OF_NEIGHBERS_TO_SHARE);
+    sizeOfNeighbersToShare = Math.min(sizeOfNeighbersToShare, this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE);
 
-    const sizeOfNeighbersBuffer = Buffer.alloc(1).writeUIntBE(sizeOfNeighbers,0,1);
-    const encryptionTypeBuffer = Buffer.alloc(1).writeUIntBE(EncryptionType.RSA2048,0,1);
+    const sizeOfNeighbersBuffer = Buffer.alloc(1);
+    sizeOfNeighbersBuffer.writeUIntBE(sizeOfNeighbers, 0, 1);
+
+    const encryptionTypeBuffer = Buffer.alloc(1);
+    encryptionTypeBuffer.writeUIntBE(EncryptionType.RSA2048, 0, 1);
+
     const SharedNeighbersBuffer = Buffer.alloc(18 * sizeOfNeighbersToShare);
 
-    //get random neighbers slice from peer
     const peerKeys = shuffle(Object.keys(this.Peer));
     const randomNeighbers = peerKeys.slice(0, sizeOfNeighbersToShare);
 
     const addressBuffers: Buffer[] = [];
+
     // write random neighbers to buffer
     randomNeighbers.forEach((publicKey, index) => {
-      const ip = this.Peer[publicKey].socket.remoteAddress
-      const port = this.Peer[publicKey].socket.remotePort;
-
-      // const ipBuffer = net.isIPv6(ip) ? ip6.toBuffer(ip) : ip.toBuffer(ip);
-      // const portBuffer = Buffer.alloc(2).writeUInt16BE(port);
-
-      addressBuffers.push(Buffer.concat([ipBuffer, portBuffer]));
+      addressBuffers.push(IP.ipv6AddressStringToBuffer(this.getNetAddresses(this.Peer[publicKey].socket)) ?? Buffer.alloc(18));
     });
 
     const payload = Buffer.concat(addressBuffers);
@@ -264,6 +300,10 @@ private handleNotify(data: Buffer, socket: net.Socket) {
   private verifyChallenge(payload: Buffer): boolean {
     const sha256 = createHash('sha256').update(payload).digest('hex');
     return sha256.startsWith('000000');
+  }
+
+  private solveChallenge() {
+
   }
   // do {
   //   let nonce = randomBytes(8);
@@ -291,6 +331,7 @@ private handleNotify(data: Buffer, socket: net.Socket) {
   // } while (!sha256.startsWith('000000'))
 
   /** Shared */
+  /** package and send response to socket */
   private sendResponse(socket: net.Socket, messageType: number | string, payload: Buffer) {
     const size = Buffer.alloc(2);
     const messageTypeBuffer = Buffer.alloc(2);
