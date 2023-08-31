@@ -5,17 +5,28 @@
   "main": "./src/index.ts",
   "scripts": {
     "start": "npx nodemon src/index.ts",
+<<<<<<< HEAD
     "eslint": "npx eslint ./src",
     "doc": "typedoc --out docs/typedoc src/index.ts",
     "test": "jest --coverage"
+=======
+    "eslint": "eslint",
+    "doc": "typedoc --out docs/typedoc src/index.ts"
+>>>>>>> origin/yueqi
   },
   "author": "Boning Li",
   "license": "none",
   "dependencies": {
+<<<<<<< HEAD
     "bson": "^5.4.0",
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "lodash": "^4.17.21",
+=======
+    "args": "^5.0.3",
+    "dotenv": "^16.3.1",
+    "ini": "^4.1.1",
+>>>>>>> origin/yueqi
     "nodemon": "^2.0.22",
     "randombytes": "^2.1.0",
     "ts-node": "^10.9.1"
@@ -25,6 +36,7 @@
     "@types/jest": "^29.5.4",
     "@types/lodash": "^4.14.197",
     "@types/node": "^20.5.6",
+<<<<<<< HEAD
     "@types/randombytes": "^2.0.0",
     "@typescript-eslint/eslint-plugin": "^6.4.1",
     "@typescript-eslint/parser": "^6.4.1",
@@ -33,5 +45,11 @@
     "ts-jest": "^29.1.1",
     "typedoc": "^0.25.0",
     "typescript": "^5.2.2"
+=======
+    "@typescript-eslint/eslint-plugin": "^6.4.1",
+    "@typescript-eslint/parser": "^6.4.1",
+    "eslint": "^8.48.0",
+    "typedoc": "^0.25.0"
+>>>>>>> origin/yueqi
   }
 }
