@@ -10,9 +10,8 @@ class MessageType {
         "507": "GOSSIP ENROLL REGISTER",
         "508": "GOSSIP ENROLL SUCCESS",
 
-        // "508": "GOSSIP RESPONSE SUCCESS",
-        // "509": "GOSSIP RESPONSE FAILURE",
-        // "510": "GOSSIP ENROLL FAILURE",
+        "509": "GOSSIP RESPONSE FAILURE",
+        "510": "GOSSIP BORDCAST",
 
 
 

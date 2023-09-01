@@ -8,30 +8,39 @@ import randomBytes from 'randombytes';
 import MESSAGETYPE from './MessageType';
 
 import { add } from 'lodash';
+
+import crypto from 'crypto';
 import { createHash, generateKeyPairSync } from 'crypto';
 import { serialize, deserialize, BSONError } from 'bson';
 import IP from './ip';
 import MessageType from './MessageType';
 
-import { EncryptionType , Header } from './TypeDefiniton';
+
+import { EncryptionType, Header, ChallengeType } from './TypeDefiniton';
 import * as ExternProtocol from './ExternProtocol';
- 
 
 /**.ini */
 const defaultConfig = {
   ENROLL_TIMEOUT: 15000,
   MAX_SIZE_OF_NEIGHBERS_TO_SHARE: 3,
   ENCRYPTION_TYPE: EncryptionType.RSA2048,
+  RETRY_DURATION: 1000,
+  bootstrapper: `p2psec.net.in.tum.de:6001`,
+
 }
 
+type publicKey = string;
 export default class GossipServer {
   /* Shared */
+
   // store the cache of the messages
   private Config: { [key: string]: any } = {};
   // Cache for messages
   private Cache: any = {};
+
   private InternServer: net.Server;
   private ExternServer: net.Server;
+
 
   private publicKey;
   private privateKey;
@@ -41,8 +50,12 @@ export default class GossipServer {
   private Topics: { [dataType: string]: net.Socket[] } = {};
 
   /* Extern Only */
-  private Peer: { [publicKey: string]: { [socket: string]: net.Socket } } = {};
-  private Challenges: { [address: string]: { challenge: string, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket } } = {};
+  private Peer: { [publicKey: string]: { socket: net.Socket } } = {};
+  private Challenges: {
+    [address: string]:
+    { challenge: string, challengeType: ChallengeType, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket }
+  } = {};
+  private UnConnectedPeers: { [address: string]: publicKey } = {};
 
   constructor(internPort = 7001, externPort = 4000, config = defaultConfig) {
     this.Config = config;
@@ -62,7 +75,7 @@ export default class GossipServer {
 
     // Generate RSA key pair
     if (this.Config.ENCRYPTION_TYPE === EncryptionType.RSA2048) {
-      const { privateKey, publicKey } = generateKeyPairSync('RSA', {
+      const { privateKey, publicKey } = generateKeyPairSync('rsa', {
         modulusLength: 2048,
         publicKeyEncoding: {
           type: 'spki',
@@ -78,6 +91,8 @@ export default class GossipServer {
       this.privateKey = privateKey;
     }
 
+    // Build Netz
+    this.buildNetzConnection();
   }
 
   /** Intern Only */
@@ -176,161 +191,6 @@ export default class GossipServer {
     console.log(`Data Type: ${dataType}`);
   }
 
-
-  /** Extern Only */
-  private handleExternConnection(socket: net.Socket) {
-    /**TODO
-     */
-
-    const address = this.getNetAddresses(socket);
-    this.sendChallenge(socket);
-    console.log(``);
-    console.log('New externClient connected from ' + address);
-
-    socket.on('data', (data: Buffer) => {
-      const { size, messageType } = this.getHeader(data);
-
-      console.log(``);
-      console.log(`Received data from internClient client: ${data}`);
-      console.log(`Message Type: ${messageType} ${MESSAGETYPE.getName(messageType.toString())}`);
-
-      // Dispatch message to corresponding handler
-      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL INIT') {
-        this.sendChallenge(socket);
-      }
-      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL CHALLENGE') {
-        this.solveChallenge(socket, data);
-      }
-      if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ENROLL REGISTER') {
-        this.handleRegister(socket, data);
-      }
-
-    });
-
-    // Remove the socket from the topics when the client disconnects
-    socket.on('end', () => {
-      console.log(`internClient ${this.getNetAddresses(socket)} disconnected `);
-      Object.keys(this.Topics).forEach((topic) => {
-        const index = this.Topics[topic].findIndex((client) => client === socket);
-        if (index !== -1) {
-          this.Topics[topic].splice(index, 1);
-        }
-      });
-      console.log('Client disconnected');
-    });
-
-    // Handle errors
-    socket.on('error', (err) => {
-      console.error(err);
-    });
-  }
-
-  private sendChallenge(socket: net.Socket) {
-    const address = this.getNetAddresses(socket);
-    const challenge = randomBytes(64);
-
-    const destroyClockId = setTimeout(() => {
-      socket.end();
-    }, this.Config.ENROLL_TIMEOUT);
-
-    this.Challenges[address] = {
-      challenge: challenge.toString('hex'),
-      destroyClockId: destroyClockId,
-      socket: socket
-    }
-    this.sendResponse(socket, MessageType.getCode('GOSSIP ENROLL CHALLENGE'), challenge);
-  }
-
-  private solveChallenge(socket: net.Socket, data: Buffer) {
-    const challenge = data.subarray(0, 8);
-    const nonce = randomBytes(64);
-    const payload = Buffer.concat([challenge, nonce, this.publicKey.]);
-  }
-  private handleRegister(socket: net.Socket, data: Buffer) {
-    const challenge = data.subarray(0, 8);
-    const nonce = data.subarray(8, 16);
-    // reserved for future use, currently only SHA-256 is supported
-    const HashAlgorithmType = data.readUIntBE(16, 1);
-    // reserved for future use, currently only RSA-2048 is supported
-    const encryptionType = data.readUIntBE(17, 1);
-    const publicKey = data.subarray(18);
-
-    const payload = Buffer.concat([challenge, nonce, publicKey]);
-    const address = this.getNetAddresses(socket);
-
-    if (this.verifyChallenge(payload)) {
-      this.Peer[publicKey.toString('ascii')] = { socket: socket };
-      clearTimeout(this.Challenges[address].destroyClockId);
-      delete this.Challenges[address];
-      this.sendRegisterSuccess(socket);
-    } else {
-      clearTimeout(this.Challenges[address].destroyClockId);
-      socket.end();
-    }
-  }
-
-
-  private sendRegisterSuccess(socket: net.Socket) {
-    const sizeOfNeighbers = Object.keys(this.Peer).length;
-    let sizeOfNeighbersToShare: number = sizeOfNeighbers / 2;
-    sizeOfNeighbersToShare = Math.min(sizeOfNeighbersToShare, this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE);
-
-    const sizeOfNeighbersBuffer = Buffer.alloc(1);
-    sizeOfNeighbersBuffer.writeUIntBE(sizeOfNeighbers, 0, 1);
-
-    const encryptionTypeBuffer = Buffer.alloc(1);
-    encryptionTypeBuffer.writeUIntBE(EncryptionType.RSA2048, 0, 1);
-
-    const SharedNeighbersBuffer = Buffer.alloc(18 * sizeOfNeighbersToShare);
-
-    const peerKeys = shuffle(Object.keys(this.Peer));
-    const randomNeighbers = peerKeys.slice(0, sizeOfNeighbersToShare);
-
-    const addressBuffers: Buffer[] = [];
-
-    // write random neighbers to buffer
-    randomNeighbers.forEach((publicKey, index) => {
-      addressBuffers.push(IP.ipv6AddressStringToBuffer(this.getNetAddresses(this.Peer[publicKey].socket)) ?? Buffer.alloc(18));
-    });
-
-    const payload = Buffer.concat(addressBuffers);
-    this.sendResponse(socket, 507, payload);
-  }
-
-  private verifyChallenge(payload: Buffer): boolean {
-    const sha256 = createHash('sha256').update(payload).digest('hex');
-    return sha256.startsWith('000000');
-  }
-
-  private solveChallenge() {
-
-  }
-  // do {
-  //   let nonce = randomBytes(8);
-
-  //   payload = Buffer.concat(
-  //       [challenge,
-  //           teamNumber,
-  //           projectChoice,
-  //           nonce,
-  //           Buffer.from(utf8encoder.encode(
-  //               email + "\r\n"
-  //               + firstname + "\r\n"
-  //               + lastname + "\r\n"
-  //               + lrzGitLabUsername))]);
-
-  //   // console.log(`paylpoad: ${payload.toString("hex")}`);
-  //   // console.log(`paylpoad: "${payload.toString("ascii")}"`);
-  //   // payloadUTF8 = hexToUtf8(payload);
-  //   // console.log(`paylpoad utf8: ${stringToHex(payloadUTF8)}`);
-  //   // // console.log(stringToHex(payloadUTF8)==payload);
-
-  //   sha256 = createHash('sha256').update(payload).digest('hex');
-  //   // sha256="000000cec83b9daf2984245367d702a8331b292bb5737"
-
-  // } while (!sha256.startsWith('000000'))
-
-  /** Shared */
   /** package and send response to socket */
   private sendResponse(socket: net.Socket, messageType: number | string, payload: Buffer) {
     const size = Buffer.alloc(2);
@@ -356,9 +216,196 @@ export default class GossipServer {
     return { size, messageType };
   }
 
-  private broadcast(messageID: Buffer) {
+  /** Extern Only */
+  private handleExternConnection(socket: net.Socket) {
+    /**TODO
+     */
 
+    const address = this.getNetAddresses(socket);
+    this.sendChallenge(socket);
+    console.log(``);
+    console.log('New externClient connected from ' + address);
+
+    socket.on('data', (data: Buffer) => {
+      const incomingJsonData = deserialize(data)
+
+      console.log(``);
+      console.log(`Received data from internClient client: ${data}`);
+      console.log(`Message Type: ${incomingJsonData.messageTypeId} ${MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString())}`);
+
+      // Dispatch message to corresponding handler
+      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL INIT') {
+        return this.sendChallenge(socket);
+      }
+      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL CHALLENGE') {
+        return this.solveChallenge(socket, incomingJsonData as ExternProtocol.GossipEnrollChallenge);
+      }
+      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL SUCCESS') {
+        return this.handleRegisterSuccess(socket, incomingJsonData as ExternProtocol.GossipEnrollSuccess);
+      }
+      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP RESPONSE FAILURE') {
+        return this.handleRegister(socket, data as ExternProtocol.Go);
+      }
+      // if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP BORDCAST') {
+      //   return this.handleRegister(socket, data);
+      // }
+    });
+
+    // Remove the socket from the topics when the client disconnects
+    socket.on('end', () => {
+      console.log(`internClient ${this.getNetAddresses(socket)} disconnected `);
+      Object.keys(this.Topics).forEach((topic) => {
+        const index = this.Topics[topic].findIndex((client) => client === socket);
+        if (index !== -1) {
+          this.Topics[topic].splice(index, 1);
+        }
+      });
+      console.log('Client disconnected');
+    });
+
+    // Handle errors
+    socket.on('error', (err) => {
+      console.error(err);
+    });
   }
+
+  private buildNetzConnection() {
+    if (Object.keys(this.UnConnectedPeers).length > 0) {
+      setTimeout(() => this.connectToPeer(this.Config.bootstrapper), this.Config.RETRY_DURATION);
+    }
+    while (Object.keys(this.Peer).length < this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE) {
+      this.connectToPeer();
+    }
+  }
+
+  private connectToPeer(address: string = "") {
+    let target: string = address + "";
+    if (address == "") {
+      if (Object.keys(this.UnConnectedPeers).length === 0) {
+        target = this.Config.bootstrapper;
+      } else {
+        target = shuffle(Object.keys(this.UnConnectedPeers))[0];
+      }
+    }
+
+    const socket = net.createConnection(target, () => { })
+    socket.on('data', (data: Buffer) => {
+      //  TODO: add logic
+    })
+    socket.on('end', () => {
+      // delete this.Peer[this.getNetAddresses(socket)];
+    })
+  }
+
+  private handleRegister(socket: net.Socket, data: ExternProtocol.GossipEnrollRegister) {
+
+    const address = this.getNetAddresses(socket);
+
+    if (this.verifyChallenge(data)) {
+      this.Peer[data.publicKey] = { socket: socket };
+      clearTimeout(this.Challenges[address].destroyClockId);
+      delete this.Challenges[address];
+      this.sendRegisterSuccess(socket);
+    } else {
+      clearTimeout(this.Challenges[address].destroyClockId);
+      this.sendRegisterFailed(socket, 'Challenge failed');
+      socket.end();
+    }
+  }
+
+  private handleRegisterSuccess(socket: net.Socket, data: ExternProtocol.GossipEnrollSuccess) {
+    this.Peer[data.publicKey] = { socket: socket };
+    delete this.UnConnectedPeers[this.getNetAddresses(socket)];
+    data.neighbours.forEach((neighbour) => {
+      this.UnConnectedPeers[neighbour.address] = neighbour.publicKey;
+    })
+
+    this.buildNetzConnection();
+  }
+
+  private sendChallenge(socket: net.Socket) {
+    const address = this.getNetAddresses(socket);
+    const challenge = randomBytes(64);
+
+    //set timeout to destroy socket
+    const destroyClockId = setTimeout(() => {
+      socket.end();
+    }, this.Config.ENROLL_TIMEOUT);
+
+    //store challenge
+    this.Challenges[address] = {
+      challenge: challenge.toString('base64'),
+      challengeType: ChallengeType.SHA256_6,
+      destroyClockId: destroyClockId,
+      socket: socket
+    }
+
+    const payload: ExternProtocol.GossipEnrollChallenge = {
+      messageTypeId: 506,
+      challengeType: ChallengeType.SHA256_6,
+      challenge: challenge.toString('base64')
+    }
+    socket.write(serialize(payload))
+  }
+
+  private sendRegisterSuccess(socket: net.Socket) {
+    const sizeOfNeighbers = Object.keys(this.Peer).length;
+    let sizeOfNeighbersToShare: number = sizeOfNeighbers / 2;
+    sizeOfNeighbersToShare = Math.min(sizeOfNeighbersToShare, this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE);
+
+    const neighbours = shuffle(Object.keys(this.Peer)).slice(0, sizeOfNeighbersToShare).map((publicKey) => {
+      return {
+        address: this.getNetAddresses(this.Peer[publicKey].socket),
+        publicKey: publicKey
+      }
+    })
+
+    const payload: ExternProtocol.GossipEnrollSuccess = {
+      messageTypeId: 508,
+      publicKey: this.publicKey!,
+      neighbours: neighbours
+    }
+
+    socket.write(serialize(payload))
+  }
+
+  private sendRegisterFailed(socket: net.Socket, errorMassage: string) {
+    const payload: ExternProtocol.GossipEnrollFailed = {
+      messageTypeId: 509,
+      errorMassage: errorMassage
+    }
+    socket.write(serialize(payload))
+  }
+
+  private solveChallenge(socket: net.Socket, data: ExternProtocol.GossipEnrollChallenge) {
+    let payload: ExternProtocol.GossipEnrollRegister;
+    do {
+      const nonce = randomBytes(64);
+      payload = {
+        messageTypeId: 507,
+        challenge: data.challenge, //64 bytes Buffer in Base64
+        nonce: nonce.toString("base64"), //64 bytes Buffer in Base64
+        publicKey: this.publicKey! //PEM
+      };
+    } while (!this.verifyChallenge(payload))
+    socket.write(serialize(payload))
+  }
+
+  private verifyChallenge(payload: ExternProtocol.GossipEnrollRegister): boolean {
+    const sha256 = createHash('sha256').update(serialize(payload)).digest('base64');
+    return sha256.startsWith('000000');
+  }
+
+
+  /** Shared */
+
+
+  private broadcast(data: ExternProtocol.GossipBordcast) {
+    if (this.Cache[data.messageId] !== undefined) {
+      return;
+    }
+  }
+
 
   private removeClient(socket: net.Socket) {
 

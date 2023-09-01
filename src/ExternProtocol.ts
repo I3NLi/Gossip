@@ -22,21 +22,18 @@ export type GossipEnrollRegister = {
 
 export type GossipEnrollSuccess = {
     messageTypeId: 508,
-    sizeOfNeighbours: number
+    publicKey: string //PEM
     neighbours: {
-        ip: string,
+        address: string,
         publicKey: string //PEM
     }[]
 }
-export type GossipEnrollFailed = {
+export type GossipEnrollFailure = {
     messageTypeId: 509,
-    sizeOfNeighbours: number
-    neighbours: {
-        ip: string,
-        publicKey: string //PEM
-    }[]
+    errorMassage: string
 }
-export type GossipAnnounce = {
+
+export type GossipBordcast = {
     messageTypeId: 510,
     messageId: string //(hash value of the original message),
     message: string //encrypted message,
