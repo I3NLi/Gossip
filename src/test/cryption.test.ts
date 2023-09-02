@@ -3,6 +3,7 @@ import {
     verify,
     signWithKeyList,
     verifyWithKeyList,
+    getVerifyData,
 } from '../Cryption';
 import * as crypto from 'crypto';
 
@@ -62,23 +63,11 @@ describe('Crypto Utils', () => {
     });
 
     // 使用密钥列表的测试
-    // describe('Sign and Verify with Key List 0-2', () => {
-    //     it('should sign and verify data with key list', () => {
-    //         const data = Buffer.from('Hello, World!');
-    //         const signaturedData = signWithKeyList(data, privateKeyList.slice(0, 1));
-    //         const isValid = verifyWithKeyList(signaturedData, publicKeyList.slice(0, 1));
-    //         expect(isValid).toBe(true);
-    //     });
-
-    //     it('should throw an error when verifying with empty public key list', () => {
-    //         expect(() => verifyWithKeyList(Buffer.from('Data'), [], 'SHA256')).toThrowError();
-    //     });
-    // });
-    describe('Sign and Verify with Key List', () => {
+    describe('Sign and Verify with Key List 0-2', () => {
         it('should sign and verify data with key list', () => {
             const data = Buffer.from('Hello, World!');
-            const signaturedData = signWithKeyList(data, privateKeyList);
-            const isValid = verifyWithKeyList(signaturedData, publicKeyList.reverse());
+            const signaturedData = signWithKeyList(data, privateKeyList.slice(0, 1));
+            const isValid = verifyWithKeyList(signaturedData, publicKeyList.slice(0, 1));
             expect(isValid).toBe(true);
         });
 
@@ -86,4 +75,24 @@ describe('Crypto Utils', () => {
             expect(() => verifyWithKeyList(Buffer.from('Data'), [], 'SHA256')).toThrowError();
         });
     });
+    describe('Sign and Verify with Key List', () => {
+        it('should sign and verify data with key list', () => {
+            const data = Buffer.from('Hello, World!');
+            const signaturedData = signWithKeyList(data, privateKeyList);
+            const isValid = verifyWithKeyList(signaturedData, publicKeyList);
+            expect(isValid).toBe(true);
+        });
+
+        it('should throw an error when verifying with empty public key list', () => {
+            expect(() => verifyWithKeyList(Buffer.from('Data'), [], 'SHA256')).toThrowError();
+        });
+        it('should sign and verify data with key list and return buffer', () => {
+            const data = Buffer.from('Hello, World!');
+            const signaturedData = signWithKeyList(data, privateKeyList);
+            const verfiyedData = getVerifyData(signaturedData, publicKeyList);
+            expect(verfiyedData?.toString("base64")).toBe(data.toString('base64'));
+        });
+    });
+
+
 });

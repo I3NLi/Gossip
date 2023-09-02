@@ -1,23 +1,27 @@
 /* eslint-disable @typescript-eslint/no-duplicate-enum-values */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
+// Node.js 核心模块
 import * as net from 'net';
+import crypto, { createHash, generateKeyPairSync } from 'crypto';
+
+// 第三方库
 import shuffle from 'lodash/shuffle';
 import randomBytes from 'randombytes';
-
-import MESSAGETYPE from './MessageType';
-
-import { add } from 'lodash';
-
-import crypto from 'crypto';
-import { createHash, generateKeyPairSync } from 'crypto';
 import { serialize, deserialize, BSONError } from 'bson';
-import IP from './ip';
-import MessageType from './MessageType';
 
-
+// 本地模块
+import MESSAGETYPE from './MessageType';
+import { add } from 'lodash';
 import { EncryptionType, Header, ChallengeType } from './TypeDefiniton';
 import * as ExternProtocol from './ExternProtocol';
+import {
+  sign,
+  verify,
+  signWithKeyList,
+  verifyWithKeyList,
+  getVerifyData,
+} from './Cryption';
 
 /**.ini */
 const defaultConfig = {
@@ -26,7 +30,8 @@ const defaultConfig = {
   ENCRYPTION_TYPE: EncryptionType.RSA2048,
   RETRY_DURATION: 1000,
   bootstrapper: `p2psec.net.in.tum.de:6001`,
-
+  CACHE_SIZE: 1000,
+  DEFAULT_TTL: 10
 }
 
 type publicKey = string;
@@ -75,16 +80,10 @@ export default class GossipServer {
 
     // Generate RSA key pair
     if (this.Config.ENCRYPTION_TYPE === EncryptionType.RSA2048) {
-      const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
         modulusLength: 2048,
-        publicKeyEncoding: {
-          type: 'spki',
-          format: 'PEM'
-        },
-        privateKeyEncoding: {
-          type: 'pkcs8',
-          format: 'PEM'
-        }
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
       });
 
       this.publicKey = publicKey;
@@ -162,6 +161,17 @@ export default class GossipServer {
     console.log(`Data Type: ${dataType}`);
     console.log(`Message Data: ${messageData.toString()}`);
     console.log('\n');
+
+    const payload:ExternProtocol.GossipBordcast = {
+      messageTypeId: 510,
+      messageId: createHash('sha256').update(messageData).digest('base64'),
+      message: messageData.toString('base64'),
+      keyList: [],
+      ttl:this.Cache.DEFAULT_TTL
+    }
+
+    this.Cache[payload.messageId] = payload;
+    this.broadcast(payload.messageId);
   }
 
   private handleNotify(data: Buffer, socket: net.Socket) {
@@ -240,15 +250,18 @@ export default class GossipServer {
       if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL CHALLENGE') {
         return this.solveChallenge(socket, incomingJsonData as ExternProtocol.GossipEnrollChallenge);
       }
+      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL REGISTER') {
+        return this.handleRegister(socket, incomingJsonData as ExternProtocol.GossipEnrollRegister);
+      }
       if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL SUCCESS') {
         return this.handleRegisterSuccess(socket, incomingJsonData as ExternProtocol.GossipEnrollSuccess);
       }
       if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP RESPONSE FAILURE') {
-        return this.handleRegister(socket, data as ExternProtocol.Go);
+        return this.handleRegisterFailed(socket, incomingJsonData as ExternProtocol.GossipEnrollFailure);
       }
-      // if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP BORDCAST') {
-      //   return this.handleRegister(socket, data);
-      // }
+      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP BORDCAST') {
+        return this.handleBordcast(socket, incomingJsonData as ExternProtocol.GossipBordcast);
+      }
     });
 
     // Remove the socket from the topics when the client disconnects
@@ -323,6 +336,33 @@ export default class GossipServer {
     this.buildNetzConnection();
   }
 
+  private handleRegisterFailed(socket: net.Socket, data: ExternProtocol.GossipEnrollFailure) {
+    console.error(data.errorMassage);
+    // throw new Error(data.errorMassage);
+  }
+
+  private handleBordcast(socket: net.Socket, data: ExternProtocol.GossipBordcast) {
+    if (this.Cache[data.messageId] !== 510) {
+      throw new Error('Message ID invalid')
+    }
+    if (this.Cache[data.messageId]) return; // donot boradcast again
+
+    const message = getVerifyData(Buffer.from(data.message, 'base64'), data.keyList);
+    if (message === undefined) {
+      throw new Error('Message verification failed')
+    }
+
+    // store message in cache
+    const keysOfCache = Object.keys(this.Cache)
+    if (this.Config.CACHE_SIZE < keysOfCache.length) {
+      delete this.Cache[keysOfCache[0]];
+      this.Cache[data.messageId] = data;
+    }
+
+    // send notification
+    this.sendNotification(Buffer.from(data.messageId, "base64"), Buffer.from(data.message, 'base64'), message);
+
+  }
   private sendChallenge(socket: net.Socket) {
     const address = this.getNetAddresses(socket);
     const challenge = randomBytes(64);
@@ -400,10 +440,26 @@ export default class GossipServer {
   /** Shared */
 
 
-  private broadcast(data: ExternProtocol.GossipBordcast) {
-    if (this.Cache[data.messageId] !== undefined) {
+  private broadcast(messageId: string) {
+    if (this.Cache[messageId] !== undefined) {
       return;
     }
+
+    const data = this.Cache[messageId];
+
+    // build broadcast message
+    const payload: ExternProtocol.GossipBordcast = {
+      messageTypeId: 510,
+      messageId: data.messageId,
+      message: signWithKeyList(data.message, [this.privateKey!]).toString("base64"),
+      keyList: [...data.keyList, this.publicKey!],
+      ttl: data.ttl - 1
+    }
+    const payloadBuffer = serialize(payload);
+
+    Object.keys(this.Peer).forEach((publicKey) => {
+      this.Peer[publicKey].socket.write(payloadBuffer);
+    });
   }
 
 
@@ -450,7 +506,7 @@ export default class GossipServer {
     console.log(`valid: ${valid}`);
 
     if (valid.readUInt8(0) === 1) {
-      this.broadcast(messageID);
+      this.broadcast(messageID.toString("base64"));
     } else {
       this.handleErrorMesssage(messageID);
     }

@@ -1,3 +1,4 @@
+import { type } from "os";
 import { EncryptionType, ChallengeType } from "./TypeDefiniton";
 
 export type GossipEnrollInit = {
@@ -38,7 +39,7 @@ export type GossipBordcast = {
     messageId: string //(hash value of the original message),
     message: string //encrypted message,
     keyList: string[] //(array of public keys),
-    sizeOfNeighbours: number,
-    TTL: number
+    ttl: number
 }
 
+// export type GossipBordcastResponse = {

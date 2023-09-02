@@ -5,6 +5,8 @@
  * Copyright (c) 2023 Boning Li
  */
 
+import { result } from "lodash";
+
 
 
 class Ip {
@@ -168,37 +170,29 @@ class Ip {
     // Shorten IPv6 by removing leading zeros
     public shortenIPv6(ipv6: string) {
         const groups = this.normalizeIPv6(ipv6).split(':');
-        let shortGroups = [];
-        let zeroGroupCount = 0;
-        let zeroGroupIndex = -1;
+        const resultGroups = [];
+        let findZero = false;
+        let outOfZero = false;
 
         // Count the consecutive zero groups and find their starting index
         for (let i = 0; i < groups.length; i++) {
-            if (groups[i] === '0000') {
-                if (zeroGroupCount === 0) {
-                    zeroGroupIndex = i;
+            if (groups[i] === '0000' ) {
+                if (!findZero&&!outOfZero) {
+                    findZero = true;
+                    resultGroups.push('');
+                }else if(outOfZero){
+                    resultGroups.push(groups[i]);
                 }
-                zeroGroupCount++;
+                
             } else {
-                if (zeroGroupCount > 1) {
-                    shortGroups.push('');
+                if(findZero){
+                    outOfZero=true;
                 }
-                zeroGroupCount = 0;
-                shortGroups.push(groups[i]);
+                resultGroups.push(groups[i]);
             }
         }
 
-        // If there are trailing zero groups, add them
-        if (zeroGroupCount > 1) {
-            shortGroups.push('');
-        }
-
-        // If there are leading zero groups, add them
-        if (zeroGroupIndex > 0) {
-            shortGroups = [''].concat(shortGroups);
-        }
-
-        return shortGroups.join(':');
+        return resultGroups.join(':');
     }
 
     /** is valid String */
@@ -223,25 +217,12 @@ class Ip {
         return true;
     }
     public isValidIPv6(ipv6: string): boolean {
-
-        if (ipv6 == "") {
-            return false;
-        }
-        const parts = this.normalizeIPv6(ipv6).split(':');
-
-        if (parts == undefined || parts.length !== 8) {
-            return false;
-        }
-
-        for (const part of parts) {
-            const value = parseInt(part, 16);
-            if (isNaN(value) || value < 0 || value > 0xFFFF) {
-                return false;
-            }
-        }
-
-        return true;
+   
+        return this.ipv6Regex.test(ipv6);
     }
+    
+    
+    
 
     /** Buffer to String */
     public ipBufferToString(buffer: Buffer): string | undefined {
@@ -274,7 +255,8 @@ class Ip {
     }
 
     public ipv4Regex = /^(\d{1,3}\.){3,3}\d{1,3}$/;
-    public ipv6Regex = /^(::)?(((\d{1,3}\.){3}(\d{1,3}){1})?([0-9a-f]){0,4}:{0,2}){1,8}(::)?$/i;
+    public ipv6Regex =  /(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))/gi;
+
 
 }
 
