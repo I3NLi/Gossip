@@ -95,6 +95,10 @@ export default class GossipServer {
   }
 
   /** Intern Only */
+  /**
+ * Method to handle internal connections.
+ * @param socket - The Socket connection of the internal client.
+ */
   private handleInternConnection(socket: net.Socket) {
     // Handle Connection from internal clients(other modules)
     console.log('New internClient connected from ' + this.getNetAddresses(socket));
@@ -133,7 +137,10 @@ export default class GossipServer {
       console.error(err);
     });
   }
-
+  /**
+   * Handle announcement messages.
+   * @param data - The received data.
+   */
   private handleAnnounce(data: Buffer) {
     /** TODO: 
      * Message to instruct Gossip to spread the knowledge about given data item. It is sent from
@@ -162,18 +169,22 @@ export default class GossipServer {
     console.log(`Message Data: ${messageData.toString()}`);
     console.log('\n');
 
-    const payload:ExternProtocol.GossipBordcast = {
+    const payload: ExternProtocol.GossipBordcast = {
       messageTypeId: 510,
       messageId: createHash('sha256').update(messageData).digest('base64'),
       message: messageData.toString('base64'),
       keyList: [],
-      ttl:this.Cache.DEFAULT_TTL
+      ttl: this.Cache.DEFAULT_TTL
     }
 
     this.Cache[payload.messageId] = payload;
     this.broadcast(payload.messageId);
   }
-
+  /**
+   * Handle notification messages.
+   * @param data - The received data.
+   * @param socket - The client Socket connection.
+   */
   private handleNotify(data: Buffer, socket: net.Socket) {
     /**
      * This message serves two purposes. Firstly, it is used to instruct Gossip to notify the module
@@ -201,7 +212,13 @@ export default class GossipServer {
     console.log(`Data Type: ${dataType}`);
   }
 
-  /** package and send response to socket */
+  /**
+ * Package and send response to socket
+ * @param socket - The target Socket connection.
+ * @param messageType - The message type.
+ * @param payload - The payload data.
+ */
+
   private sendResponse(socket: net.Socket, messageType: number | string, payload: Buffer) {
     const size = Buffer.alloc(2);
     const messageTypeBuffer = Buffer.alloc(2);
@@ -220,6 +237,11 @@ export default class GossipServer {
     socket.write(response);
   }
 
+  /**
+ * Get the message header.
+ * @param data - The data buffer.
+ * @returns The message header object.
+ */
   private getHeader(data: Buffer): Header {
     const size = data.readUInt16BE(0);
     const messageType = data.readUInt16BE(2);
@@ -410,7 +432,7 @@ export default class GossipServer {
   }
 
   private sendRegisterFailed(socket: net.Socket, errorMassage: string) {
-    const payload: ExternProtocol.GossipEnrollFailed = {
+    const payload: ExternProtocol.GossipEnrollFailure = {
       messageTypeId: 509,
       errorMassage: errorMassage
     }
@@ -446,12 +468,12 @@ export default class GossipServer {
     }
 
     const data = this.Cache[messageId];
-
+    const newMessage = signWithKeyList(data.message, [this.privateKey!])
     // build broadcast message
     const payload: ExternProtocol.GossipBordcast = {
       messageTypeId: 510,
       messageId: data.messageId,
-      message: signWithKeyList(data.message, [this.privateKey!]).toString("base64"),
+      message: Buffer.from(newMessage).toString("base64"),
       keyList: [...data.keyList, this.publicKey!],
       ttl: data.ttl - 1
     }
