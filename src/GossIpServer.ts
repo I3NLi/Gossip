@@ -22,6 +22,7 @@ import {
   verifyWithKeyList,
   getVerifyData,
 } from './Cryption';
+import assert from 'assert';
 
 /**.ini */
 const defaultConfig = {
@@ -167,9 +168,12 @@ export default class GossipServer {
     socket.on('end', () => {
       console.log(`internClient ${this.getNetAddresses(socket)} disconnected `);
       Object.keys(this.Topics).forEach((topic) => {
-        const index = this.Topics[topic].findIndex((client) => client === socket);
-        if (index !== -1) {
-          this.Topics[topic].splice(index, 1);
+        const sockets = this.Topics[topic];
+
+        for (let i = sockets.length - 1; i >= 0; i--) {
+          if (sockets[i] === socket) {
+            sockets.splice(i, 1);
+          }
         }
       });
       console.log('Client disconnected');
@@ -214,14 +218,21 @@ export default class GossipServer {
 
     const payload: ExternProtocol.GossipBordcast = {
       messageTypeId: 510,
-      messageId: createHash('sha256').update(messageData).digest('base64'),
+      messageId: createHash('sha256').update(messageData).digest().slice(0, 2).toString('base64'),
       message: messageData.toString('base64'),
       keyList: [],
       ttl: this.Config.DEFAULT_TTL
     }
 
+    const messageIdBuffer = Buffer.from(payload.messageId, 'base64');
+    assert(messageIdBuffer.length === 2, 'messageId should be 2 bytes');
+    const dataTypeBuffer = Buffer.alloc(2);
+    dataTypeBuffer.writeUInt16BE(dataType);
+
+    this.sendNotification(messageIdBuffer, dataTypeBuffer, messageData);
+
     this.Cache[payload.messageId] = payload;
-    this.broadcast(payload.messageId);
+    // this.broadcast(payload.messageId);
   }
   /**
    * Handle notification messages.
@@ -242,7 +253,7 @@ export default class GossipServer {
 
     const reserved = data.readUInt16BE(4);
     const dataType = data.readUInt16BE(6);
-    if (this.Topics[dataType] === undefined) {
+    if (this.Topics[dataType.toString()] === undefined) {
       this.Topics[dataType] = [];
     }
 
@@ -251,8 +262,12 @@ export default class GossipServer {
     } else {
       this.Topics[dataType].push(socket);
     }
-    console.log(`Reserved: ${reserved}`);
-    console.log(`Data Type: ${dataType}`);
+
+    if (this.Config.DEBUG) {
+      console.log(`Reserved: ${reserved}`);
+      console.log(`Data Type: ${dataType}`);
+      console.log(`Topics` + JSON.stringify(this.Topics))
+    }
   }
 
   /**
@@ -347,7 +362,7 @@ export default class GossipServer {
       return this.handleRegisterFailed(socket, incomingJsonData as ExternProtocol.GossipEnrollFailure);
     }
     if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP BORDCAST') {
-      // return this.handleBordcast(socket, incomingJsonData as ExternProtocol.GossipBordcast);
+      return this.handleBordcast(socket, incomingJsonData as ExternProtocol.GossipBordcast);
     }
   }
   private buildNetzConnection() {
@@ -461,9 +476,13 @@ export default class GossipServer {
       this.Cache[data.messageId] = data;
     }
 
-    // send notification
-    this.sendNotification(Buffer.from(data.messageId, "base64"), Buffer.from(data.message, 'base64'), message);
+    // const messageIdBuffer = Buffer.from(data.messageId, 'base64');
+    // assert(messageIdBuffer.length === 2, 'messageId should be 2 bytes');
+    // const dataTypeBuffer = Buffer.alloc(2);
+    // dataTypeBuffer.writeUInt16BE(Number.parseInt(data.messageId));
 
+    // this.sendNotification(messageIdBuffer, dataTypeBuffer, message);
+    // TODO: send notification to other modules
   }
   private sendChallenge(socket: net.Socket) {
     const address = this.getNetAddresses(socket);
@@ -600,12 +619,25 @@ export default class GossipServer {
      * other peers if it is well-formed.
      * 
      */
+    assert(messageID.length === 2, 'messageID should be 2 bytes');
+    assert(dataType.length === 2, 'dataType should be 2 bytes');
+
     const payload = Buffer.concat([messageID, dataType, data]);
 
-    this.Topics[dataType.toString()].forEach((socket) => {
+    if (this.Config.DEBUG) {
+      console.log(`messageID: ${messageID.toString("hex")}`)
+      console.log(`dataType: ${dataType.toString()}`)
+      console.log(`data: ${data.toString("hex")}`)
+    }
+
+    this.Topics[dataType.readInt16BE().toString()].forEach((socket) => {
+      if (this.Config.DEBUG) {
+        console.log(`sendNotification to ${this.getNetAddresses(socket)}`)
+
+      }
       this.sendResponse(socket, 502, payload);
-      socket.write(payload);
     })
+
   }
 
   private handleValidation(data: Buffer) {
@@ -614,19 +646,27 @@ export default class GossipServer {
      * is well-formed or not. The bitfield V, if set signifies the the notification is wellformed; 
      * otherwise it is to be deemed invalid and hence should not be propagated further.
      */
-    const messageID = data.subarray(32, 48);
-    const reserved = data.subarray(48, 55);
-    const valid = data.subarray(55, 56);
+    const messageID = data.readInt16BE(4);
+    const reserved = data.readInt16BE(6);
+    const valid = reserved & 0x01;
 
     console.log(`messageID: ${messageID}`);
     console.log(`reserved: ${reserved}`);
     console.log(`valid: ${valid}`);
 
-    if (valid.readUInt8(0) === 1) {
-      this.broadcast(messageID.toString("base64"));
+    if (valid) {
+      if (this.Config.DEBUG) {
+        console.log(`Message ${messageID} is valid`);
+      }
+      // this.broadcast(messageID.toString("base64"));
     } else {
-      this.handleErrorMesssage(messageID);
+      if (this.Config.DEBUG) {
+        console.log(`Message ${messageID} is valid`);
+      }
+
+      // this.handleErrorMesssage(messageID);
     }
+
   }
 
   private getNetAddresses(socket: net.Socket) {
