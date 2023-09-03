@@ -25,23 +25,27 @@ import {
 
 /**.ini */
 const defaultConfig = {
+  INTERN_PORT: 7001,
+  EXTERN_PORT: 4002,
   ENROLL_TIMEOUT: 15000,
+  ENROLL_HARDNESS: 1,
   MAX_SIZE_OF_NEIGHBERS_TO_SHARE: 3,
   ENCRYPTION_TYPE: EncryptionType.RSA2048,
   RETRY_DURATION: 1000,
-  bootstrapper: `p2psec.net.in.tum.de:6001`,
+  bootstrapper: `localhost:4002`,
   CACHE_SIZE: 1000,
-  DEFAULT_TTL: 10
+  DEFAULT_TTL: 10,
+  DEBUG: true,
 }
 
 type publicKey = string;
 export default class GossipServer {
   /* Shared */
-
+  private id: string;
   // store the cache of the messages
-  private Config: { [key: string]: any } = {};
+  private Config: typeof defaultConfig = defaultConfig;
   // Cache for messages
-  private Cache: any = {};
+  private Cache: { [messageTypeId: string]: ExternProtocol.GossipBordcast } = {};
 
   private InternServer: net.Server;
   private ExternServer: net.Server;
@@ -55,27 +59,57 @@ export default class GossipServer {
   private Topics: { [dataType: string]: net.Socket[] } = {};
 
   /* Extern Only */
-  private Peer: { [publicKey: string]: { socket: net.Socket } } = {};
+  private Peers: { [address: string]: { socket: net.Socket, publicKey: string } } = {};
   private Challenges: {
     [address: string]:
     { challenge: string, challengeType: ChallengeType, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket }
   } = {};
   private UnConnectedPeers: { [address: string]: publicKey } = {};
 
-  constructor(internPort = 7001, externPort = 4000, config = defaultConfig) {
-    this.Config = config;
+  constructor(config = {}) {
+    this.Config = { ...defaultConfig, ...config };
+
+    this.id = Math.random().toString(36).substring(2, 15)
+    if (this.Config.DEBUG) {
+      console.log(`+++++++++++++++++++server started  +++++++++++++++++`)
+      console.log(`internServer started at ${this.Config.INTERN_PORT} `)
+      console.log(`externServer started at ${this.Config.EXTERN_PORT} `)
+    }
 
     // Create internal and external servers
     this.InternServer = net.createServer();
     this.ExternServer = net.createServer();
 
-    // Listen on specified ports
-    this.InternServer.listen(internPort);
-    // this.ExternServer.listen(externPort);
+    this.InternServer.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${this.Config.INTERN_PORT} is already in use for internal connections.`);
+      } else {
+        console.error('An error occurred:', error);
+      }
+    });
+
+    this.ExternServer.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${this.Config.EXTERN_PORT} is already in use for internal connections.`);
+      } else {
+        console.error('An error occurred:', error);
+      }
+    });
 
     // Set up event handlers for internal and external connections
     this.InternServer.on('connection', this.handleInternConnection.bind(this));
     this.ExternServer.on('connection', this.handleExternConnection.bind(this));
+
+
+    // Listen on specified ports
+    this.InternServer.listen(this.Config.INTERN_PORT, () => {
+      console.log(`Internal server is listening on port ${this.Config.INTERN_PORT}`);
+    });
+
+    this.ExternServer.listen(this.Config.EXTERN_PORT, () => {
+      console.log(`External server is listening on port ${this.Config.EXTERN_PORT}`);
+    });
+
     console.log('GossipServer created');
 
     // Generate RSA key pair
@@ -90,13 +124,20 @@ export default class GossipServer {
       this.privateKey = privateKey;
     }
 
+    if (this.Config.DEBUG) {
+      console.log(`Config: ${JSON.stringify(this.Config)}`)
+      console.log(`Public Key: ${this.publicKey}`);
+      console.log(`Private Key: ${this.privateKey}`);
+      console.log('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+    }
     // Build Netz
-    this.buildNetzConnection();
+    // wait for server started
+    setTimeout(() => this.buildNetzConnection(), 1000);
   }
 
   /** Intern Only */
   /**
- * Method to handle internal connections.
+ * Method to handle internal connections. The Route are also dispatched here.
  * @param socket - The Socket connection of the internal client.
  */
   private handleInternConnection(socket: net.Socket) {
@@ -107,9 +148,11 @@ export default class GossipServer {
       const { size, messageType } = this.getHeader(data);
 
       console.log(`Received data from internClient client: ${this.getNetAddresses(socket)}`);
-      console.log(`Message Size: ${size}`);
-      console.log(`Message Type: ${messageType} ${MESSAGETYPE.getName(messageType.toString())}`);
 
+      if (this.Config.DEBUG) {
+        console.log(`Message Size: ${size}`);
+        console.log(`Message Type: ${messageType} ${MESSAGETYPE.getName(messageType.toString())}`);
+      }
       // Dispatch message to corresponding handler
       if (MESSAGETYPE.getName(messageType.toString()) === 'GOSSIP ANNOUNCE') {
         this.handleAnnounce(data);
@@ -174,7 +217,7 @@ export default class GossipServer {
       messageId: createHash('sha256').update(messageData).digest('base64'),
       message: messageData.toString('base64'),
       keyList: [],
-      ttl: this.Cache.DEFAULT_TTL
+      ttl: this.Config.DEFAULT_TTL
     }
 
     this.Cache[payload.messageId] = payload;
@@ -250,40 +293,16 @@ export default class GossipServer {
 
   /** Extern Only */
   private handleExternConnection(socket: net.Socket) {
-    /**TODO
-     */
 
     const address = this.getNetAddresses(socket);
+    console.log('New Extren connected from ' + address);
+
+
     this.sendChallenge(socket);
-    console.log(``);
-    console.log('New externClient connected from ' + address);
+
 
     socket.on('data', (data: Buffer) => {
-      const incomingJsonData = deserialize(data)
-
-      console.log(``);
-      console.log(`Received data from internClient client: ${data}`);
-      console.log(`Message Type: ${incomingJsonData.messageTypeId} ${MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString())}`);
-
-      // Dispatch message to corresponding handler
-      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL INIT') {
-        return this.sendChallenge(socket);
-      }
-      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL CHALLENGE') {
-        return this.solveChallenge(socket, incomingJsonData as ExternProtocol.GossipEnrollChallenge);
-      }
-      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL REGISTER') {
-        return this.handleRegister(socket, incomingJsonData as ExternProtocol.GossipEnrollRegister);
-      }
-      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL SUCCESS') {
-        return this.handleRegisterSuccess(socket, incomingJsonData as ExternProtocol.GossipEnrollSuccess);
-      }
-      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP RESPONSE FAILURE') {
-        return this.handleRegisterFailed(socket, incomingJsonData as ExternProtocol.GossipEnrollFailure);
-      }
-      if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP BORDCAST') {
-        return this.handleBordcast(socket, incomingJsonData as ExternProtocol.GossipBordcast);
-      }
+      this.handleExternDataIncoming(data, socket);
     });
 
     // Remove the socket from the topics when the client disconnects
@@ -304,40 +323,92 @@ export default class GossipServer {
     });
   }
 
-  private buildNetzConnection() {
-    if (Object.keys(this.UnConnectedPeers).length > 0) {
-      setTimeout(() => this.connectToPeer(this.Config.bootstrapper), this.Config.RETRY_DURATION);
+  private handleExternDataIncoming(data: Buffer, socket: net.Socket) {
+    const incomingJsonData = deserialize(data)
+
+    console.log(``);
+    console.log(`Received data from ExternClient client: ${data}`);
+    console.log(`Message Type: ${incomingJsonData.messageTypeId} ${MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString())}`);
+
+    // Dispatch message to corresponding handler
+    if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL INIT') {
+      return this.sendChallenge(socket);
     }
-    while (Object.keys(this.Peer).length < this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE) {
-      this.connectToPeer();
+    if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL CHALLENGE') {
+      return this.solveChallenge(socket, incomingJsonData as ExternProtocol.GossipEnrollChallenge);
+    }
+    if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL REGISTER') {
+      return this.handleRegister(socket, incomingJsonData as ExternProtocol.GossipEnrollRegister);
+    }
+    if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP ENROLL SUCCESS') {
+      return this.handleRegisterSuccess(socket, incomingJsonData as ExternProtocol.GossipEnrollSuccess);
+    }
+    if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP RESPONSE FAILURE') {
+      return this.handleRegisterFailed(socket, incomingJsonData as ExternProtocol.GossipEnrollFailure);
+    }
+    if (MESSAGETYPE.getName(incomingJsonData.messageTypeId.toString()) === 'GOSSIP BORDCAST') {
+      // return this.handleBordcast(socket, incomingJsonData as ExternProtocol.GossipBordcast);
     }
   }
+  private buildNetzConnection() {
+    const functionInstanceId = Math.random().toString(36).substring(2, 15)
+    if (this.Config.DEBUG) {
+      console.log(`${functionInstanceId} +++++++++++++++++++buildNetzConnection+++++++++++++++++`)
+      console.log(`${functionInstanceId} UnConnectedPeers: ${JSON.stringify(this.UnConnectedPeers)}`)
+      console.log(`${functionInstanceId} Peer: ${JSON.stringify(this.Peers)}`)
 
-  private connectToPeer(address: string = "") {
-    let target: string = address + "";
-    if (address == "") {
-      if (Object.keys(this.UnConnectedPeers).length === 0) {
-        target = this.Config.bootstrapper;
-      } else {
-        target = shuffle(Object.keys(this.UnConnectedPeers))[0];
+    }
+    if (!Object.keys(this.UnConnectedPeers).length) {
+      if (this.Config.DEBUG) {
+        console.log(`No UnConnectedPeers, connect to bootstrapper ${this.Config.bootstrapper} after ${this.Config.RETRY_DURATION}ms`)
+      }
+      setTimeout(() => this.connectToPeer(this.Config.bootstrapper), this.Config.RETRY_DURATION);
+    } else {
+      while (Object.keys(this.Peers).length < this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE) {
+        this.connectToPeer();
       }
     }
+    console.log(`${functionInstanceId} ++++++++++++++++***buildNetzConnection***++++++++++++++`)
 
-    const socket = net.createConnection(target, () => { })
-    socket.on('data', (data: Buffer) => {
-      //  TODO: add logic
-    })
-    socket.on('end', () => {
-      // delete this.Peer[this.getNetAddresses(socket)];
-    })
   }
+  private connectToPeer(address: string = "") {
+    if (Object.keys(this.UnConnectedPeers).includes(address)) {
+      console.log(`Peer ${address} already connected`)
+    }
+
+    if (!address) {
+      if (this.Config.DEBUG) {
+        console.log(`No address provided, randomly select one from UnConnectedPeers`)
+      }
+      const peerAddresses = Object.keys(this.UnConnectedPeers);
+      address = shuffle(peerAddresses)[0];
+    }
+
+    if (this.Config.DEBUG) {
+      console.log(`Connecting to peer at address: ${address}`);
+    }
+
+    const [host, port] = address.split(':');
+    const socket = net.createConnection(Number.parseInt(port), host, () => {
+      console.log(`Connected to peer at address: ${address}`);
+      socket.on('data', (data: Buffer) => {
+        this.handleExternDataIncoming(data, socket);
+      });
+
+      socket.on('end', () => {
+        if (this.Config.DEBUG) { console.log(`Peer ${address} disconnected`) }
+        delete this.Peers[this.getNetAddresses(socket)];
+      });
+    });
+  }
+
 
   private handleRegister(socket: net.Socket, data: ExternProtocol.GossipEnrollRegister) {
 
     const address = this.getNetAddresses(socket);
 
     if (this.verifyChallenge(data)) {
-      this.Peer[data.publicKey] = { socket: socket };
+      this.Peers[this.getNetAddresses(socket)] = { socket: socket, publicKey: data.publicKey };
       clearTimeout(this.Challenges[address].destroyClockId);
       delete this.Challenges[address];
       this.sendRegisterSuccess(socket);
@@ -349,12 +420,21 @@ export default class GossipServer {
   }
 
   private handleRegisterSuccess(socket: net.Socket, data: ExternProtocol.GossipEnrollSuccess) {
-    this.Peer[data.publicKey] = { socket: socket };
+    if (this.Config.DEBUG) {
+      console.log(`handleRegisterSuccess: ${JSON.stringify(data)}`)
+    }
+
+    this.Peers[this.getNetAddresses(socket)] = { socket: socket, publicKey: data.publicKey };
+
     delete this.UnConnectedPeers[this.getNetAddresses(socket)];
     data.neighbours.forEach((neighbour) => {
       this.UnConnectedPeers[neighbour.address] = neighbour.publicKey;
     })
 
+    if (this.Config.DEBUG) {
+      console.log(`Peer ${JSON.stringify(this.Peers)}`)
+      console.log(`UnConnectedPeers ${JSON.stringify(this.UnConnectedPeers)}`)
+    }
     this.buildNetzConnection();
   }
 
@@ -364,7 +444,7 @@ export default class GossipServer {
   }
 
   private handleBordcast(socket: net.Socket, data: ExternProtocol.GossipBordcast) {
-    if (this.Cache[data.messageId] !== 510) {
+    if (!this.Cache[data.messageId]) {
       throw new Error('Message ID invalid')
     }
     if (this.Cache[data.messageId]) return; // donot boradcast again
@@ -391,6 +471,7 @@ export default class GossipServer {
 
     //set timeout to destroy socket
     const destroyClockId = setTimeout(() => {
+      console.log(`Enroll timeout, destroy socket ${address}`);
       socket.end();
     }, this.Config.ENROLL_TIMEOUT);
 
@@ -408,17 +489,19 @@ export default class GossipServer {
       challenge: challenge.toString('base64')
     }
     socket.write(serialize(payload))
+
+    console.log(`Send challenge to ${address}`);
   }
 
   private sendRegisterSuccess(socket: net.Socket) {
-    const sizeOfNeighbers = Object.keys(this.Peer).length;
+    const sizeOfNeighbers = Object.keys(this.Peers).length;
     let sizeOfNeighbersToShare: number = sizeOfNeighbers / 2;
     sizeOfNeighbersToShare = Math.min(sizeOfNeighbersToShare, this.Config.MAX_SIZE_OF_NEIGHBERS_TO_SHARE);
 
-    const neighbours = shuffle(Object.keys(this.Peer)).slice(0, sizeOfNeighbersToShare).map((publicKey) => {
+    const neighbours = shuffle(Object.keys(this.Peers)).slice(0, sizeOfNeighbersToShare).map((address) => {
       return {
-        address: this.getNetAddresses(this.Peer[publicKey].socket),
-        publicKey: publicKey
+        address: this.getNetAddresses(this.Peers[address].socket),
+        publicKey: this.Peers[address].publicKey
       }
     })
 
@@ -441,6 +524,10 @@ export default class GossipServer {
 
   private solveChallenge(socket: net.Socket, data: ExternProtocol.GossipEnrollChallenge) {
     let payload: ExternProtocol.GossipEnrollRegister;
+
+    if (this.Config.DEBUG) {
+      console.log(`solveingChallenge: ${JSON.stringify(data)}`)
+    }
     do {
       const nonce = randomBytes(64);
       payload = {
@@ -450,12 +537,20 @@ export default class GossipServer {
         publicKey: this.publicKey! //PEM
       };
     } while (!this.verifyChallenge(payload))
+
+    if (this.Config.DEBUG) {
+      console.log(`solvedChallenge: ${JSON.stringify(payload)}`)
+    }
     socket.write(serialize(payload))
   }
 
   private verifyChallenge(payload: ExternProtocol.GossipEnrollRegister): boolean {
-    const sha256 = createHash('sha256').update(serialize(payload)).digest('base64');
-    return sha256.startsWith('000000');
+    const challenge = Array(this.Config.ENROLL_HARDNESS).fill('0').join('')
+    const sha256 = createHash('sha256').update(serialize(payload)).digest('hex');
+    if (this.Config.DEBUG) {
+      console.log(`verifyChallenge: ${sha256}`)
+    }
+    return sha256.startsWith(challenge);
   }
 
 
@@ -468,7 +563,7 @@ export default class GossipServer {
     }
 
     const data = this.Cache[messageId];
-    const newMessage = signWithKeyList(data.message, [this.privateKey!])
+    const newMessage = signWithKeyList(Buffer.from(data.message), [this.privateKey!])
     // build broadcast message
     const payload: ExternProtocol.GossipBordcast = {
       messageTypeId: 510,
@@ -479,8 +574,8 @@ export default class GossipServer {
     }
     const payloadBuffer = serialize(payload);
 
-    Object.keys(this.Peer).forEach((publicKey) => {
-      this.Peer[publicKey].socket.write(payloadBuffer);
+    Object.keys(this.Peers).forEach((address) => {
+      this.Peers[address].socket.write(payloadBuffer);
     });
   }
 

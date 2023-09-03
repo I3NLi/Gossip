@@ -28,4 +28,5 @@ import ini from 'ini';
 // console.log(`Database Host: ${databaseHost}`);
 // console.log(`App Theme: ${appTheme}`);
 
-const server = new GossipServer(7001, 4000);
+const server = new GossipServer({
+});
