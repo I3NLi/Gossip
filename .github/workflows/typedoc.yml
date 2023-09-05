@@ -4,7 +4,7 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  build_and_lint:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
@@ -27,8 +27,8 @@ jobs:
       - name: Create the docs directory locally in CI
         run: npm run docs
 
-      - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@4.1.4
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          branch: gh-pages
-          folder: docs/typedoc
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/typeDoc
