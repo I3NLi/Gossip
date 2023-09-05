@@ -28,7 +28,7 @@ jobs:
       run: ls -al
     - run: npm ci
     - run: npm run doc
-    - run: npm test
+    - run: npm run test
     
   # Deploy job
   deploy:
@@ -48,7 +48,12 @@ jobs:
     # Specify runner + deployment step
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v2 # or the latest "vX.X.X" version tag for this action
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Deploy to GitHub Pagespublic
+        uses: actions/deploy-pages@v2
+        with:
+          # 必要参数：部署目录（通常是生成的静态文件目录）
+          artifacts: public
 
