@@ -35,13 +35,13 @@ const defaultConfig = {
   MAX_SIZE_OF_NEIGHBERS_TO_SHARE: 3,
   ENCRYPTION_TYPE: EncryptionType.RSA2048,
   RETRY_DURATION: 1000,
-  bootstrapper: `127.0.0.1:4001`,
+  BOOTSTRAPPER: `[::1]:4001`,
   CACHE_SIZE: 1000,
   DEFAULT_TTL: 10,
   DEBUG: true,
   COUNTER_RESET_DURATION: 1000,
   COUNTER_LIMIT: 10,
-  BLOCK_LIST_UPDATE_DURATION: 1000 ,
+  BLOCK_LIST_UPDATE_DURATION: 1000,
   BLOCK_LIST_REMOVAL_DURATION: 1000 * 60 * 5,
 }
 
@@ -85,11 +85,14 @@ export default class GossipServer {
   private Peers: { [publicKey: string]: Peer } = {};
   private Challenges: {
     [address: string]:
-    { challenge: string, challengeType: ChallengeType, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket }
+    { challenge: string, challengeType: ChallengeType, destroyClockId: ReturnType<typeof setTimeout>, socket: net.Socket, challengeHardness: number }
   } = {};
   private UnConnectedPeers: { [address: string]: PublicKey } = {};
 
-
+  /**
+   * Constructor for the GossipServer class.
+   * @param config - The configuration object for the server.
+   */
   constructor(config = {}) {
     this.Config = { ...defaultConfig, ...config };
 
@@ -100,8 +103,7 @@ export default class GossipServer {
     this.ExternServer = net.createServer();
 
 
-
-
+    // Error handling for internal server
     this.InternServer.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
         console.error(`Port ${this.Config.INTERN_PORT} is already in use for internal connections.`);
@@ -109,7 +111,7 @@ export default class GossipServer {
         console.error('An error occurred:', error);
       }
     });
-
+    // Error handling for external server
     this.ExternServer.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
         console.error(`Port ${this.Config.EXTERN_PORT} is already in use for internal connections.`);
@@ -162,7 +164,7 @@ export default class GossipServer {
     // this.NetzBuildingClockId = setTimeout(() => this.buildNetzConnection(), this.Config.RETRY_DURATION);
 
     this.BlackListResetClockId = setInterval(() => this.updateBlockList(), this.Config.BLOCK_LIST_UPDATE_DURATION);
-    this.MessageCountersResetId = setInterval(() => this.messageCounters={}, this.Config.COUNTER_RESET_DURATION);
+    this.MessageCountersResetId = setInterval(() => this.messageCounters = {}, this.Config.COUNTER_RESET_DURATION);
   }
 
   /** Intern Only */
@@ -308,7 +310,6 @@ export default class GossipServer {
  * @param messageType - The message type.
  * @param payload - The payload data.
  */
-
   private sendResponse(socket: net.Socket, messageType: number | string, payload: Buffer) {
     const size = Buffer.alloc(2);
     const messageTypeBuffer = Buffer.alloc(2);
@@ -339,6 +340,10 @@ export default class GossipServer {
   }
 
   /** Extern Only */
+  /**
+ * Handles the connection of an external peer.
+ * @param socket - The socket representing the connection to the peer.
+ */
   private handleExternConnection(socket: net.Socket) {
 
     const address = this.getNetAddress(socket);
@@ -360,7 +365,11 @@ export default class GossipServer {
       console.error(err);
     });
   }
-
+  /**
+   * Handles incoming data from an external peer.
+   * @param data - The incoming data.
+   * @param socket - The socket associated with the data.
+   */
   private handleExternDataIncoming(data: Buffer, socket: net.Socket) {
     let incomingJsonData
     try { incomingJsonData = deserialize(data) } catch (e) {
@@ -395,7 +404,9 @@ export default class GossipServer {
       return this.handleBordcast(socket, incomingJsonData as ExternProtocol.GossipBordcast);
     }
   }
-
+  /**
+   * Builds network connections to peers based on configuration.
+   */
   private buildNetzConnection() {
     if (Object.keys(this.Peers).length >= this.Config.MAX_SIZE_OF_PEERS) return;
 
@@ -407,8 +418,8 @@ export default class GossipServer {
 
     if (!Object.keys(this.UnConnectedPeers).length) {
 
-      this.printDebugInfo(`No UnConnectedPeers, connect to bootstrapper ${this.Config.bootstrapper} after ${this.Config.RETRY_DURATION}ms`)
-      this.connectToPeer(this.Config.bootstrapper)
+      this.printDebugInfo(`No UnConnectedPeers, connect to BOOTSTRAPPER ${this.Config.BOOTSTRAPPER} after ${this.Config.RETRY_DURATION}ms`)
+      this.connectToPeer(this.Config.BOOTSTRAPPER)
 
     } else {
       const countOfNewPeers = Math.min(this.Config.MAX_SIZE_OF_PEERS, Object.keys(this.Peers).length)
@@ -424,7 +435,10 @@ export default class GossipServer {
 
 
   }
-
+  /**
+   * Connects to a specified peer address.
+   * @param address - The address of the peer to connect to.
+   */
   private connectToPeer(address: string = "") {
     if (this.getServerAddress(this.ExternServer) === address) {
       this.printDebugInfo(`cannot connect to it self: ${address}`);
@@ -468,19 +482,32 @@ export default class GossipServer {
         this.printDebugInfo(`Peer ${address} disconnected`)
         delete this.Peers[this.getNetAddress(socket)];
       });
+
+      socket.on('error', (err) => {
+        this.printDebugInfo(`Peer ${address} error: ${err}`)
+        delete this.UnConnectedPeers[address];
+      })
     });
   }
 
-
+  /**
+   * Handles the registration of a peer.
+   * @param socket - The socket representing the peer.
+   * @param data - The registration data from the peer.
+   */
   private handleRegister(socket: net.Socket, data: ExternProtocol.GossipEnrollRegister) {
     const address = this.getNetAddress(socket);
-
-
     this.printDebugInfo(`handleRegister: ${address}`)
     this.printDebugInfo(`handleRegister: ${JSON.stringify(data)}`)
 
+    if (this.Challenges[address].challenge !== data.challenge) {
+      this.printDebugInfo(`challenge is not valid`)
+      this.sendRegisterFailed(socket, 'challenge did not match');
+      socket.end();
+      return
+    }
 
-    if (this.verifyChallenge(data)) {
+    if (this.verifyChallenge(data, this.Challenges[address].challengeHardness)) {
       this.Peers[data.publicKey] = { socket: socket, serverAdress: data.serverAddress };
       clearTimeout(this.Challenges[address].destroyClockId);
       delete this.Challenges[address];
@@ -491,7 +518,11 @@ export default class GossipServer {
       socket.end();
     }
   }
-
+  /**
+   * Handles a successful registration response from a peer.
+   * @param socket - The socket representing the peer.
+   * @param data - The registration success data from the peer.
+   */
   private handleRegisterSuccess(socket: net.Socket, data: ExternProtocol.GossipEnrollSuccess) {
 
     this.printDebugInfo(`handleRegisterSuccess: ${this.getNetAddress(socket)}`)
@@ -526,12 +557,20 @@ export default class GossipServer {
     // }
     // this.buildNetzConnection();
   }
-
+  /**
+   * Handles a failed registration response from a peer.
+   * @param socket - The socket representing the peer.
+   * @param data - The registration failure data from the peer.
+   */
   private handleRegisterFailed(socket: net.Socket, data: ExternProtocol.GossipEnrollFailure) {
-    console.error(data.errorMassage);
-    // throw new Error(data.errorMassage);
+    this.printDebugInfo(`handleRegisterFailed: ${this.getNetAddress(socket)}`)
+    delete this.UnConnectedPeers[this.getNetAddress(socket)];
   }
-
+  /**
+   * Handles a broadcast message received from a peer.
+   * @param socket - The socket representing the peer.
+   * @param data - The broadcast message data.
+   */
   private handleBordcast(socket: net.Socket, data: ExternProtocol.GossipBordcast) {
 
     this.printDebugInfo(`handleBordcast from: ${this.getNetAddress(socket)}`)
@@ -541,13 +580,13 @@ export default class GossipServer {
     // if (this.Cache[data.messageId]) return; // donot broadcast again
 
     const message = getVerifyData(Buffer.from(data.message, 'base64'), data.keyList)
-    if (message === undefined ||  createHash('sha256').update(message.toString()).digest('base64')!==data.messageId) {
+    if (message === undefined || createHash('sha256').update(message.toString()).digest('base64') !== data.messageId) {
       this.printDebugInfo(`message is not valid`)
       this.blockPeer(data.keyList)
       return
     }
 
-    if(this.updataMessageCounter(data.keyList)){
+    if (this.updataMessageCounter(data.keyList)) {
       this.printDebugInfo(`message counter is too high`)
       this.blockPeer(data.keyList)
       return
@@ -555,12 +594,12 @@ export default class GossipServer {
 
     this.printDebugInfo(`message: ${message.toString()}`)
 
-    if(this.isIncludedInBlockList(data.keyList)){
+    if (this.isIncludedInBlockList(data.keyList)) {
       this.printDebugInfo(`message is in block list`)
       // this.blockPeer(data.keyList)
       return
     }
-    
+
     if (this.Cache[data.messageId]) {
       this.printDebugInfo(`message ${data.messageId} already broadcasted`)
       return; // donot broadcast again
@@ -581,11 +620,22 @@ export default class GossipServer {
     this.broadcast(data);
     // TODO: send notification to other modules
   }
-
+  /**
+   * Sends a challenge to an external peer during enrollment.
+   * @param socket - The socket representing the peer.
+   */
   private sendChallenge(socket: net.Socket) {
 
     const address = this.getNetAddress(socket);
     const challenge = randomBytes(64);
+    const blockListLength = Object.keys(this.blockList).length ? Object.keys(this.blockList).length : 1;
+    const challengeHardness = this.Config.ENROLL_HARDNESS + Math.floor(blockListLength ** -2); //dynamic hardness based on block list
+
+    this.printDebugInfo(`challengeHardness to ${blockListLength}`)
+    assert(challengeHardness > 0, 'challengeHardness should be greater than 0')
+    assert(challengeHardness < 255, 'challengeHardness should be less than 255')
+
+
 
     //set timeout to destroy socket
     const destroyClockId = setTimeout(() => {
@@ -598,12 +648,14 @@ export default class GossipServer {
       challenge: challenge.toString('base64'),
       challengeType: ChallengeType.SHA256_6,
       destroyClockId: destroyClockId,
-      socket: socket
+      socket: socket,
+      challengeHardness: challengeHardness
     }
 
     const payload: ExternProtocol.GossipEnrollChallenge = {
       messageTypeId: 506,
       challengeType: ChallengeType.SHA256_6,
+      challengeHardness: challengeHardness, //dynamic hardness based on block list
       challenge: challenge.toString('base64'),
       publicKey: this.publicKey!
     }
@@ -613,7 +665,10 @@ export default class GossipServer {
     this.printDebugInfo(`sendChallenge to ${this.getNetAddress(socket)}`)
 
   }
-
+  /**
+   * Sends a successful registration response to a peer.
+   * @param socket - The socket representing the peer.
+   */
   private sendRegisterSuccess(socket: net.Socket) {
     const sizeOfNeighbers = Object.keys(this.Peers).length;
     let sizeOfNeighbersToShare: number = sizeOfNeighbers / 2;
@@ -639,11 +694,15 @@ export default class GossipServer {
     this.printDebugInfo(`sendRegisterSuccess: ${JSON.stringify(payload)}`)
 
   }
-
+  /**
+   * Sends a registration failure response to a peer.
+   * @param socket - The socket representing the peer.
+   * @param errorMassage - The error message to send.
+   */
   private sendRegisterFailed(socket: net.Socket, errorMassage: string) {
     const payload: ExternProtocol.GossipEnrollFailure = {
       messageTypeId: 509,
-      errorMassage: errorMassage
+      errorMessage: errorMassage
     }
     socket.write(serialize(payload))
 
@@ -651,10 +710,14 @@ export default class GossipServer {
     this.printDebugInfo(`sendRegisterFailed: ${JSON.stringify(payload)}`)
 
   }
-
+  /**
+   * Solves a challenge received from an external peer during enrollment.
+   * @param socket - The socket representing the peer.
+   * @param data - The challenge data received from the peer.
+   */
   private solveChallenge(socket: net.Socket, data: ExternProtocol.GossipEnrollChallenge) {
     let payload: ExternProtocol.GossipEnrollRegister;
-
+    assert(data.challengeHardness > 0, 'challengeHardness should be greater than 0')
 
     this.printDebugInfo(`solveingChallenge from:${this.getNetAddress(socket)}`)
 
@@ -667,7 +730,7 @@ export default class GossipServer {
         publicKey: this.publicKey!, //PEM
         serverAddress: this.getServerAddress(this.ExternServer)
       };
-    } while (!this.verifyChallenge(payload))
+    } while (!this.verifyChallenge(payload, data.challengeHardness))
 
 
     this.printDebugInfo(`Challenge solved from: ${this.getNetAddress(socket)}`)
@@ -676,17 +739,26 @@ export default class GossipServer {
 
     socket.write(serialize(payload))
   }
-
-  private verifyChallenge(payload: ExternProtocol.GossipEnrollRegister): boolean {
-    const challenge = Array(this.Config.ENROLL_HARDNESS).fill('0').join('')
+  /**
+   * Verifies a challenge during the enrollment process.
+   * @param payload - The enrollment payload containing challenge data.
+   * @returns True if the challenge is successfully verified; otherwise, false.
+   */
+  private verifyChallenge(payload: ExternProtocol.GossipEnrollRegister, challengeHardness: number): boolean {
+    assert(challengeHardness > 0, 'challengeHardness should be greater than 0')
+    const challenge = Array(challengeHardness).fill('0').join('')
     const sha256 = createHash('sha256').update(serialize(payload)).digest('hex');
 
     this.printDebugInfo(`verifyChallenge: ${sha256}`)
 
     return sha256.startsWith(challenge);
   }
-
-  private updataMessageCounter(publicKeys: string[]):boolean {
+  /**
+   * Updates message counters for the specified public keys and checks if they exceed the limit.
+   * @param publicKeys - An array of public keys to update counters for.
+   * @returns True if any of the public keys' counters exceed the limit; otherwise, false.
+   */
+  private updataMessageCounter(publicKeys: string[]): boolean {
     this.printDebugInfo(`updataMessageCounter: ${JSON.stringify(publicKeys)}`)
     let exceedeLimit = false;
     publicKeys.forEach((key) => {
@@ -700,7 +772,10 @@ export default class GossipServer {
     })
     return exceedeLimit;
   }
-
+  /**
+   * Blocks communication with peers identified by their public keys.
+   * @param publicKey - An array of public keys to block.
+   */
   private blockPeer(publicKey: string[]) {
     this.printDebugInfo(`blockPeer: ${JSON.stringify(publicKey)}`)
     publicKey.forEach((key) => {
@@ -709,8 +784,10 @@ export default class GossipServer {
   }
 
   /** Shared */
-
-
+  /**
+ * Broadcasts a gossip message to connected peers.
+ * @param payload - The gossip message to broadcast.
+ */
   private broadcast(payload: ExternProtocol.GossipBordcast) {
 
     this.printDebugInfo(`broadcast message ${payload.messageId}`)
@@ -747,7 +824,10 @@ export default class GossipServer {
 
   }
 
-
+  /**
+ * Removes a peer from the list of connected peers.
+ * @param socket - The socket of the peer to be removed.
+ */
   private removePeer(socket: net.Socket) {
     this.printDebugInfo(`removePeer: ${this.getNetAddress(socket)}`)
     for (const publicKey of Object.keys(this.Peers)) {
@@ -757,9 +837,12 @@ export default class GossipServer {
     }
     socket.end();
   }
-
-  private handleErrorMesssage(messageID: Buffer) { }
-
+  /**
+   * Sends a notification message to modules interested in a specific data type.
+   * @param messageID - The ID of the notification message.
+   * @param dataType - The data type of the message.
+   * @param data - The message data.
+   */
   private sendNotification(messageID: Buffer, dataType: Buffer, data: Buffer) {
     /** TODO:
      * This message is sent by Gossip to the module which has previously asked Gossip to notify
@@ -797,7 +880,10 @@ export default class GossipServer {
     })
 
   }
-
+  /**
+   * Handles the validation of a notification message.
+   * @param data - The data of the validation message.
+   */
   private handleValidation(data: Buffer) {
     /** 
      * The message is used to tell Gossip whether the GOSSIP NOTIFICATION with the given message ID 
@@ -826,32 +912,49 @@ export default class GossipServer {
     }
 
   }
-
+  /**
+   * Retrieves the network address of a socket.
+   * @param socket - The socket for which the address is retrieved.
+   * @returns The network address of the socket.
+   */
   private getNetAddress(socket: net.Socket) {
     return socket.remoteAddress + ':' + socket.remotePort;
   }
-
+  /**
+   * Retrieves the server address of a given server.
+   * @param server - The server for which the address is retrieved.
+   * @returns The server address.
+   */
   private getServerAddress(server: net.Server) {
     const address = server.address() as net.AddressInfo;
     return this.Config.HOST + ':' + address.port;
   }
-
+  /**
+   * Prints debug information if debugging is enabled in the configuration.
+   * @param info - The debug information to print.
+   */
   private printDebugInfo(info: string) {
     if (this.Config.DEBUG) {
       console.log(info);
     }
   }
-
+  /**
+   * Updates the block list by removing expired entries.
+   */
   private updateBlockList() {
     const now = Date.now();
     Object.keys(this.blockList).forEach((key) => {
-      this.blockList[key] -=this.Config.BLOCK_LIST_REMOVAL_DURATION;
+      this.blockList[key] -= this.Config.BLOCK_LIST_REMOVAL_DURATION;
       if (this.blockList[key] < 0) {
         delete this.blockList[key];
       }
     })
   }
-
+  /**
+   * Checks if any of the given public keys are included in the block list.
+   * @param publicKeys - An array of public keys to check.
+   * @returns True if any of the public keys are in the block list; otherwise, false.
+   */
   private isIncludedInBlockList(publicKeys: string[]): boolean {
     for (const key of publicKeys) {
       if (this.blockList[key] !== undefined) {
@@ -860,8 +963,47 @@ export default class GossipServer {
     }
     return false;
   }
+
+  /** Public API */
+  /**
+ * Sets the configuration for the GossipServer instance.
+ * @param config - The configuration object to set.
+ */
+  public setConfig(config: typeof defaultConfig) { this.Config = { ...this.Config, ...config }; }
+  /**
+ * Gets a copy of the current configuration settings.
+ * @returns A copy of the current configuration settings.
+ */
+  public getConfig() { return { ...this.Config } }
+  /**
+ * Gets a copy of the message counters.
+ * @returns A copy of the message counters.
+ */
+  public getMassageCounters() { return { ...this.messageCounters } }
+  /**
+ * Gets a copy of the blocklist containing blocked addresses.
+ * @returns A copy of the blocklist.
+ */
+  public getBlockList() { return { ...this.blockList } }
+  /**
+ * Gets the public and private keys of the server.
+ * @returns An object containing the public and private keys.
+ */
+  public getKeys() { return { publicKey: this.publicKey, privateKey: this.privateKey } }
+  /**
+ * Gets a copy of the connected peers.
+ * @returns A copy of the connected peers.
+ */
   public getPeers() { return { ...this.Peers } }
+  /**
+ * Gets a copy of the unconnected peers.
+ * @returns A copy of the unconnected peers.
+ */
   public getUnConnectedPeers() { return { ...this.UnConnectedPeers } }
+  /**
+ * Gets the server addresses of the connected peers.
+ * @returns An array of server addresses of connected peers.
+ */
   public getPeersAdress() {
     const peersAdress: string[] = []
     for (const publicKey of Object.keys(this.Peers)) {
@@ -869,6 +1011,14 @@ export default class GossipServer {
     }
     return peersAdress
   }
+  /**
+ * Gets the server addresses of the unconnected peers.
+ * @returns An array of server addresses of unconnected peers.
+ */
   public getUnConnectedPeersAdress() { return Object.keys(this.UnConnectedPeers) }
+  /**
+ * Gets a copy of the cached messages.
+ * @returns A copy of the cached messages.
+ */
   public getCachedMessages() { return { ...this.Cache } }
 }
