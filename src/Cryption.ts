@@ -7,12 +7,6 @@ export function sign(data: Buffer, privateKey: string, hashType: string = 'SHA25
     return sign.sign(privateKey);
 }
 
-export function verify(data: Buffer, signature: Buffer, publicKey: string, hashType: string = 'SHA256'): boolean {
-    const verify = crypto.createVerify(hashType);
-    verify.update(data);
-    return verify.verify(publicKey, signature);
-}
-
 export function signWithKeyList(data: Buffer, privateKeyList: string[], hashType: string = 'SHA256'): Uint8Array {
     if (privateKeyList.length === 0) {
         throw new Error('Private key list is empty');
@@ -27,6 +21,12 @@ export function signWithKeyList(data: Buffer, privateKeyList: string[], hashType
     }
 
     return signedData;
+}
+
+export function verify(data: Buffer, signature: Buffer, publicKey: string, hashType: string = 'SHA256'): boolean {
+    const verify = crypto.createVerify(hashType);
+    verify.update(data);
+    return verify.verify(publicKey, signature);
 }
 
 export function verifyWithKeyList(data: Uint8Array, publicKeyList: string[], hashType: string = 'SHA256'): boolean {

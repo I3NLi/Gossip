@@ -10,6 +10,7 @@ export type GossipEnrollChallenge = {
     messageTypeId: 506,
     challengeType: ChallengeType.SHA256_6
     challenge: string //64 bytes Buffer in Base64
+    publicKey: string //PEM
 }
 
 
@@ -18,6 +19,7 @@ export type GossipEnrollRegister = {
     challenge: string //64 bytes Buffer in Base64
     nonce: string //64 bytes Buffer in Base64
     publicKey: string //PEM
+    serverAddress: string //IPv4 or IPv6
 }
 
 
@@ -36,6 +38,7 @@ export type GossipEnrollFailure = {
 
 export type GossipBordcast = {
     messageTypeId: 510,
+    dataTypeId: number,
     messageId: string //(hash value of the original message),
     message: string //encrypted message,
     keyList: string[] //(array of public keys),

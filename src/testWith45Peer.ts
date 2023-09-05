@@ -46,23 +46,15 @@ for (let i = 0; i < 45; i++) {
     servers.push(server);
 }
 
-servers.push(new GossipServer({
+servers.push( new GossipServer({
     INTERN_PORT: 7000,
     EXTERN_PORT: 4000,
     DEBUG: false,
 }))
-
-setTimeout(() => {
-    console.log(`PeersAdress:`)
-    console.log(servers[0].getPeersAdress())
-    console.log(`UnConnectedPeersAdress:`)
-    console.log(servers[0].getUnConnectedPeersAdress())
+setTimeout (() => {
+    console.log(servers[0].getPeers())
+    console.log(servers[0].getUnConnectedPeers())
 }, 5000)
 
-
-setInterval(() => {
-    console.log("cache")
-    console.log(JSON.stringify(servers[0].getCachedMessages()))
-}, 5000)
 
 
