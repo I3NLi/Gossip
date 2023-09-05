@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Generate documentation
-        run: npm run doc
+        run: npm run docss
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v2
         with:
