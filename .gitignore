@@ -1,6 +1,6 @@
 node_modules
 */.DS_Store
-# docs/typedoc
+docs/typedoc
 coverage
 dist
 public
