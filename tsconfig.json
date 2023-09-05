@@ -92,18 +92,18 @@
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
   },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.d.ts"
+  ],
   "typedocOptions": {
     "entryPoints": [
       "src/*.ts",
     ],
-    "out": "./docs/typedoc",
-    "exclude": [
-      "./node_modules",
-      "./coverage",
-      "./docs"
-    ],
+    "out": "./public",
     "plugin": [
-      "typedoc-plugin-markdown"
+      // "typedoc-plugin-markdown"
     ]
   }
 }

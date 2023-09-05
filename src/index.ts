@@ -54,7 +54,7 @@ dns.resolve(iniConfig.gossip.p2p_address, (err, addresses) => {
     }
 
     config.HOST = addresses[0].split(":")
-    config.EXTERN_PORT =parseInt(addresses[0].split(":").pop()) 
+    config.EXTERN_PORT = parseInt(addresses[0].split(":").pop())
 });
 
 config.INTERN_PORT = parseInt(iniConfig.gossip.api_address.split(":").pop());
@@ -65,10 +65,13 @@ config.INTERN_PORT = parseInt(iniConfig.gossip.api_address.split(":").pop());
  * @type {number}
  */
 let numberOfPeers = 1;
-
+let debug = true
 // Parse command-line arguments to set configuration options
 process.argv.slice(2).forEach((arg) => {
-    const [key, value] = arg.split('=');
+    const [key, value] = arg.replace(/ /g, "").split('=');
+    if (key.startsWith('debug')) {
+        debug = value === 'true'
+    }
     if (key.startsWith('numberOfPeers') || key == `n`) {
         numberOfPeers = parseInt(value)
     } else if (key in defaultConfig) {
@@ -90,7 +93,7 @@ console.log(config)
 const customConfig: Config = {
     INTERN_PORT: config.INTERN_PORT,
     EXTERN_PORT: config.EXTERN_PORT,
-    DEBUG: true,
+    DEBUG: debug,
 }
 
 /**
@@ -115,20 +118,23 @@ for (let i = 0; i < numberOfPeers - 1; i++) {
 
 // Uncomment the following code as needed and provide appropriate TypeDoc comments:
 
-// /**
-//  * Logs information about peers and unconnected peers.
-//  */
-// setTimeout(() => {
-//     console.log(`PeersAdress:`)
-//     console.log(servers[0].getPeersAdress())
-//     console.log(`UnConnectedPeersAdress:`)
-//     console.log(servers[0].getUnConnectedPeersAdress())
-// }, 5000)
+if (debug) {
+    /**
+     * Logs information about peers and unconnected peers.
+     */
+    setTimeout(() => {
+        console.log(`PeersAdress:`)
+        console.log(servers[0].getPeersAdress())
+        console.log(`UnConnectedPeersAdress:`)
+        console.log(servers[0].getUnConnectedPeersAdress())
+    }, 10000)
 
-// /**
-//  * Logs information about the cache at regular intervals.
-//  */
-// setInterval(() => {
-//     console.log("cache")
-//     console.log(JSON.stringify(servers[0].getCachedMessages()))
-// }, 5000)
+    /**
+     * Logs information about the cache at regular intervals.
+     */
+    setInterval(() => {
+        console.log("cache")
+        console.log(JSON.stringify(servers[0].getCachedMessages()))
+    }, 5000)
+}
+
