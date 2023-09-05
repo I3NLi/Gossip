@@ -7,7 +7,7 @@
     "start": "ts-node src/index.ts",
     "watch": "npx nodemon src/index.ts",
     "eslint": "npx eslint ./src",
-    "doc": "typedoc --tsconfig tsconfig.json",
+    "docs": "typedoc --tsconfig tsconfig.json",
     "test": "jest --coverage"
   },
   "author": "Boning Li",

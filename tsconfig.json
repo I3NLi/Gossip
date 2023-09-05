@@ -101,7 +101,7 @@
     "entryPoints": [
       "src/*.ts",
     ],
-    "out": "./public",
+    "out": "./docs/typedoc",
     "plugin": [
       // "typedoc-plugin-markdown"
     ]
