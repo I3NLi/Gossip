@@ -5,9 +5,6 @@
  * Copyright (c) 2023 Boning Li
  */
 
-import { result } from "lodash";
-
-
 
 class Ip {
     /** String to Buffer */

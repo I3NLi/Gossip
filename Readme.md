@@ -54,7 +54,9 @@ If you want to make modifications to the code and run the application in develop
 
 This will start the development server with hot-reloading enabled, allowing you to make changes to the code and see the updates in real-time.
 
+## Document
 
+- [Click for Doucument](docs/typedoc/modules.md)
 
 ## License
 

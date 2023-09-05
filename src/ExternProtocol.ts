@@ -1,4 +1,4 @@
-import { EncryptionType, ChallengeType } from "./TypeDefiniton";
+import { ChallengeType } from "./TypeDefiniton";
 
 // Type definition for GossipEnrollInit message
 export type GossipEnrollInit = {

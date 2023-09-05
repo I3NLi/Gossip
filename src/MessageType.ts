@@ -1,3 +1,10 @@
+
+/**
+ * Class representing a MessageType.
+ *
+ * This class provides methods for mapping message types to codes and vice versa.
+ */
+
 class MessageType {
     private MESSAGETYPE: Record<string, string> = {
         "500": "GOSSIP ANNOUNCE",
@@ -70,11 +77,20 @@ class MessageType {
         }
         return reversedObject;
     }
-
-    public getCode(name: string): string  {
+    /**
+    * Get the message type code for a given message type name.
+    * @param name - The message type name.
+    * @returns The message type code.
+    */
+    public getCode(name: string): string {
         return this.MESSAGETYPE_INV[name]
     }
-    public getName(code: string): string  {
+    /**
+    * Get the message type name for a given message type code.
+    * @param code - The message type code.
+    * @returns The message type name.
+    */
+    public getName(code: string): string {
         return this.MESSAGETYPE[code]
 
     }

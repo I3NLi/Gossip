@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-duplicate-enum-values */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
 // Node.js core modules
@@ -12,7 +11,6 @@ import { serialize, deserialize, BSONError } from 'bson';
 
 // local modules
 import MESSAGETYPE from './MessageType';
-import { add } from 'lodash';
 import { EncryptionType, Header, ChallengeType } from './TypeDefiniton';
 import * as ExternProtocol from './ExternProtocol';
 import {
@@ -24,8 +22,27 @@ import {
 } from './Cryption';
 import assert from 'assert';
 
-/**.ini */
-const defaultConfig = {
+export interface Config {
+  INTERN_PORT: number;
+  EXTERN_PORT: number;
+  ENROLL_TIMEOUT: number;
+  ENROLL_HARDNESS: number;
+  HOST: string;
+  MAX_SIZE_OF_PEERS: number;
+  MAX_SIZE_OF_NEIGHBERS_TO_SHARE: number;
+  ENCRYPTION_TYPE: EncryptionType;
+  RETRY_DURATION: number;
+  BOOTSTRAPPER: string;
+  CACHE_SIZE: number;
+  DEFAULT_TTL: number;
+  DEBUG: boolean;
+  COUNTER_RESET_DURATION: number;
+  COUNTER_LIMIT: number;
+  BLOCK_LIST_UPDATE_DURATION: number;
+  BLOCK_LIST_REMOVAL_DURATION: number;
+}
+
+export const defaultConfig = {
   INTERN_PORT: 7001,
   EXTERN_PORT: 4001,
   ENROLL_TIMEOUT: 15000,
@@ -40,7 +57,7 @@ const defaultConfig = {
   DEFAULT_TTL: 10,
   DEBUG: true,
   COUNTER_RESET_DURATION: 1000,
-  COUNTER_LIMIT: 10,
+  COUNTER_LIMIT: 100, //should be greater than MAX_SIZE_OF_PEERS
   BLOCK_LIST_UPDATE_DURATION: 1000,
   BLOCK_LIST_REMOVAL_DURATION: 1000 * 60 * 5,
 }
@@ -49,6 +66,29 @@ type PublicKey = string
 type PrivatKey = string
 type Peer = { socket: net.Socket, serverAdress: string }
 
+/**
+ * Class representing a Gossip server.
+ * @Class GossipServer 
+ * @classdesc  A Gossip server is used for communication within a network of peers.
+ * @constructor GossipServer
+ * @property {string} id - The id of the server.
+ * @property {Config} Config - The configuration object for the server.
+ * @property {Object} Cache - The cache for storing messages.
+ * @property {net.Server} InternServer - The internal server for communication within the module.
+ * @property {net.Server} ExternServer - The external server for communication with peers.
+ * @property {string} publicKey - The public key of the server.
+ * @property {string} privateKey - The private key of the server.
+ * @property {Object} blockList - The blocklist to keep track of blocked addresses.
+ * @property {Object} messageCounters - The counters to track the number of messages sent by each peer.
+ * @property {number} NetzBuildingClockId - The timer for periodic tasks.
+ * @property {number} MessageCountersResetId - The timer for periodic tasks.
+ * @property {number} BlackListResetClockId - The timer for periodic tasks.
+ * @property {Object} Topics - The subscribed topics relation with socket.
+ * @property {Object} Peers - The peers.
+ * @property {Object} Challenges - The challenges.
+ * @property {Object} UnConnectedPeers - The unconnected peers.
+ * 
+ */
 export default class GossipServer {
   /* Shared */
   private id: string;
@@ -95,7 +135,7 @@ export default class GossipServer {
    */
   constructor(config = {}) {
     this.Config = { ...defaultConfig, ...config };
-
+    this.Config.HOST = this.Config.HOST.replace(/\[|\]/g, '')
     this.id = Math.random().toString(36).substring(2, 15)
 
     // Create internal and external servers
@@ -169,9 +209,9 @@ export default class GossipServer {
 
   /** Intern Only */
   /**
- * Method to handle internal connections. The Route are also dispatched here.
- * @param socket - The Socket connection of the internal client.
- */
+   * Method to handle internal connections. The Route are also dispatched here.
+   * @param socket - The Socket connection of the internal client.
+   */
   private handleInternConnection(socket: net.Socket) {
     // Handle Connection from internal clients(other modules)
     this.printDebugInfo('New internClient connected from ' + this.getNetAddress(socket));
