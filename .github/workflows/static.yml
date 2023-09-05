@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Generate documentation
-        run: npm run doc
+        run: typedoc --tsconfig tsconfig.json --out  ${{ steps.deployment.outputs.page_url }}
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v2
         with:
@@ -45,5 +45,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v2
-        with:
-          artifacts: public
