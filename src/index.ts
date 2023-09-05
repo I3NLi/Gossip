@@ -68,7 +68,7 @@ let numberOfPeers = 1;
 let debug = true
 // Parse command-line arguments to set configuration options
 process.argv.slice(2).forEach((arg) => {
-    const [key, value] = arg.replace(/ /g, "").split('=');
+    const [key, value] = arg.split('=');
     if (key.startsWith('debug')) {
         debug = value === 'true'
     }
@@ -86,6 +86,7 @@ process.argv.slice(2).forEach((arg) => {
 });
 
 console.log(config)
+console.log(`numberOfPeers: ${numberOfPeers}`)
 /**
  * The custom configuration for the application.
  * @type {Config}

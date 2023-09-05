@@ -199,10 +199,9 @@ export default class GossipServer {
     this.printDebugInfo('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
 
     // Build Netz
-    // wait for server started
     this.NetzBuildingClockId = setInterval(() => this.buildNetzConnection(), this.Config.RETRY_DURATION);
+    // wait for server started
     // this.NetzBuildingClockId = setTimeout(() => this.buildNetzConnection(), this.Config.RETRY_DURATION);
-
     this.BlackListResetClockId = setInterval(() => this.updateBlockList(), this.Config.BLOCK_LIST_UPDATE_DURATION);
     this.MessageCountersResetId = setInterval(() => this.messageCounters = {}, this.Config.COUNTER_RESET_DURATION);
   }
@@ -292,7 +291,7 @@ export default class GossipServer {
     const payload: ExternProtocol.GossipBordcast = {
       messageTypeId: 510,
       dataTypeId: dataType,
-      messageId: createHash('sha256').update(messageData).digest('base64'),
+      messageId: randomBytes(2).toString()+createHash('sha256').update(messageData).digest('base64'),
       message: messageDataBuffer.toString(),
       keyList: [],
       ttl: this.Config.DEFAULT_TTL
@@ -620,7 +619,7 @@ export default class GossipServer {
     // if (this.Cache[data.messageId]) return; // donot broadcast again
 
     const message = getVerifyData(Buffer.from(data.message, 'base64'), data.keyList)
-    if (message === undefined || createHash('sha256').update(message.toString()).digest('base64') !== data.messageId) {
+    if (message === undefined || createHash('sha256').update(message.toString()).digest('base64') !== data.messageId.slice(2)) {
       this.printDebugInfo(`message is not valid`)
       this.blockPeer(data.keyList)
       return
